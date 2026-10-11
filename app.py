@@ -1,15 +1,16 @@
 import streamlit as st
 import psycopg2
+import urllib.parse
 import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import io
-import urllib.parse
 
-# 1. إعداد الاتصال بقاعدة البيانات السحابية (Supabase)
+# 1. إعداد الاتصال بقاعدة البيانات السحابية مع ترميز كلمة السر تلقائياً
 @st.cache_resource
 def init_connection():
-    db_url = "postgresql://postgres:4m-sA.XRZZu!8BW@db.cncdkxgkybutccqthvxq.supabase.co:5432/postgres"
+    password = urllib.parse.quote_plus("4m-sA.XRZZu!8BW")
+    db_url = f"postgresql://postgres:{password}@db.cncdkxgkybutccqthvxq.supabase.co:5432/postgres"
     return psycopg2.connect(db_url)
 
 conn = init_connection()
