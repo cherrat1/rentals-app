@@ -4,13 +4,12 @@ import urllib.parse
 import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-import io
+io = __import__('io')
 
 # 1. إعداد الاتصال بقاعدة البيانات السحابية (Pooling)
 @st.cache_resource
 def init_connection():
     password = urllib.parse.quote_plus("4m-sA.XRZZu!8BW")
-    # الرابط الجديد الخاص بك مع وضع كلمة المرور المشفرة تلقائياً
     db_url = f"postgresql://postgres.cncdkxgkybutccqthvxq:KB9SX9JCU9rnWEHd@aws-1-eu-west-3.pooler.supabase.com:6543/postgres"
     return psycopg2.connect(db_url)
 
@@ -183,7 +182,6 @@ with tab3:
     start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1))
     end_d = d2.date_input("إلى تاريخ", value=datetime.today())
     
-    # استخدام الاستعلام الآمن المعلم بـ %s لتجنب أخطاء SyntaxError
     query = """
         SELECT tenant_name AS "اسم المكتري", 
                months_paid AS "عدد الأشهر", 
@@ -300,7 +298,18 @@ with tab5:
 # الواجهة 6: تصحيح الأخطاء
 with tab6:
     st.subheader("إلغاء عملية أداء تم تسجيلها بالخطأ")
-    df_recent = pd.read_sql_query("SELECT id AS 'رقم العملية', tenant_name AS 'اسم المكتري', months_paid AS 'عدد الأشهر', paid_months_names AS 'الأشهر المؤداة', amount AS 'المبلغ', payment_date AS 'تاريخ الأداء' FROM payments ORDER BY id DESC LIMIT 50", conn)
+    query_recent = """
+        SELECT id AS "رقم العملية", 
+               tenant_name AS "اسم المكتري", 
+               months_paid AS "عدد الأشهر", 
+               paid_months_names AS "الأشهر المؤداة", 
+               amount AS "المبلغ", 
+               payment_date AS "تاريخ الأداء" 
+        FROM payments 
+        ORDER BY id DESC 
+        LIMIT 50
+    """
+    df_recent = pd.read_sql_query(query_recent, conn)
     if not df_recent.empty:
         st.dataframe(df_recent, width='stretch')
         c1, c2 = st.columns(2)
@@ -326,7 +335,8 @@ with tab7:
         with colA:
             st.markdown("#### 📝 تعديل بيانات ومرفقات المكتري")
             c.execute("SELECT phone FROM tenants WHERE id = %s", (t_edit_id,))
-            current_phone = c.fetchone()[0]
+            res_phone = c.fetchone()
+            current_phone = res_phone[0] if res_phone else ""
             
             with st.form("edit_tenant_form"):
                 new_phone = st.text_input("تحديث رقم الهاتف:", value=current_phone if current_phone else "")
