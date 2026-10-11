@@ -9,15 +9,13 @@ import urllib.parse
 # 1. إعداد الاتصال بقاعدة البيانات السحابية (Supabase)
 @st.cache_resource
 def init_connection():
-    # ضع كلمة السر الحقيقية مكان [YOUR-PASSWORD]
-db_url = "postgresql://postgres:4m-sA.XRZZu!8BW@db.cncdkxgkybutccqthvxq.supabase.co:5432/postgres"
+    db_url = "postgresql://postgres:4m-sA.XRZZu!8BW@db.cncdkxgkybutccqthvxq.supabase.co:5432/postgres"
     return psycopg2.connect(db_url)
 
 conn = init_connection()
 conn.autocommit = True
 c = conn.cursor()
 
-# دالة لتحويل الملفات إلى بيانات ليتم حفظها داخل قاعدة البيانات بأمان
 def get_file_data(uploaded_file):
     if uploaded_file is not None:
         return uploaded_file.getvalue(), uploaded_file.name
