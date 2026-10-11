@@ -10,7 +10,7 @@ import urllib.parse
 @st.cache_resource
 def init_connection():
     # ضع كلمة السر الحقيقية مكان [YOUR-PASSWORD]
-    db_url = "postgresql://postgres:[4m-sA.XRZZu!8BW]@db.cncdkxgkybutccqthvxq.supabase.co:5432/postgres"
+db_url = "postgresql://postgres:4m-sA.XRZZu!8BW@db.cncdkxgkybutccqthvxq.supabase.co:5432/postgres"
     return psycopg2.connect(db_url)
 
 conn = init_connection()
