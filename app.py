@@ -84,7 +84,7 @@ with tab1:
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("**إضافة مكتري يدوياً مع المرفقات**")
-        with st.form("add_tenant_form"):
+        with st.form("add_tenant_form", clear_on_submit=True):
             name = st.text_input("الاسم الكامل *")
             phone = st.text_input("رقم الهاتف (للتواصل عبر الواتساب)")
             cin = st.text_input("رقم البطاقة الوطنية")
@@ -104,11 +104,12 @@ with tab1:
             rent_price = st.number_input("ثمن الكراء الشهري (درهم) *", min_value=0.0, step=100.0)
             
             st.markdown("**(اختياري) رفع المستندات:**")
-            id_card_file = st.file_uploader("نسخة البطاقة الوطنية", type=["pdf", "png", "jpg", "jpeg"])
-            contract_file = st.file_uploader("نسخة عقد الكراء", type=["pdf", "png", "jpg", "jpeg"])
-            conditions_file = st.file_uploader("كناش التحملات", type=["pdf", "png", "jpg", "jpeg"])
+            id_card_file = st.file_uploader("نسخة البطاقة الوطنية", type=["pdf", "png", "jpg", "jpeg"], key="add_id_file")
+            contract_file = st.file_uploader("نسخة عقد الكراء", type=["pdf", "png", "jpg", "jpeg"], key="add_contract_file")
+            conditions_file = st.file_uploader("كناش التحملات", type=["pdf", "png", "jpg", "jpeg"], key="add_cond_file")
             
-            if st.form_submit_button("حفظ بيانات المكتري"):
+            submitted = st.form_submit_button("حفظ بيانات المكتري")
+            if submitted:
                 if name and rent_price > 0:
                     id_bytes, id_name = get_file_data(id_card_file)
                     contract_bytes, contract_name = get_file_data(contract_file)
@@ -168,14 +169,14 @@ with tab2:
         months_paid = len(selected_months)
         calculated_amount = float(current_tenant_rent * months_paid) if current_tenant_rent else 0.0
         
-        with st.form("payment_form"):
+        with st.form("payment_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             amount = c1.number_input("المبلغ الإجمالي المدفوع (درهم)", value=calculated_amount, min_value=0.0, step=100.0)
             payment_date = c2.date_input("تاريخ الأداء", datetime.today())
             employee_name = st.text_input("اسم الموظف المستخلص")
             
             st.markdown("**(اختياري) رفع وصل الأداء (التوصيل):**")
-            receipt_file = st.file_uploader("اختر صورة أو ملف الوصل", type=["pdf", "png", "jpg", "jpeg"])
+            receipt_file = st.file_uploader("اختر صورة أو ملف الوصل", type=["pdf", "png", "jpg", "jpeg"], key="payment_receipt_file")
             
             if st.form_submit_button("تأكيد وتسجيل الأداء"):
                 if months_paid == 0:
@@ -222,11 +223,11 @@ with tab3:
     else:
         st.warning("لا توجد أداءات في هذه الفترة.")
 
-# الواجهة 4: المتقاعسون
+# الواجهة 4: المتقاعسون (مع منع التكرار)
 with tab4:
     st.subheader("الإنذارات وإرسال الرسائل للمتقاعسين")
     
-    tenants_df = pd.read_sql_query("SELECT * FROM tenants", conn)
+    tenants_df = pd.read_sql_query("SELECT DISTINCT id, name, cin, address, shop_category, rent_price, phone, start_date FROM tenants", conn)
     defaulters = []
     for index, row in tenants_df.iterrows():
         unpaid_count, unpaid_names, _, _ = get_due_status(row['start_date'], row['id'])
@@ -239,7 +240,7 @@ with tab4:
             })
             
     if defaulters:
-        df_defaulters = pd.DataFrame(defaulters)
+        df_defaulters = pd.DataFrame(defaulters).drop_duplicates(subset=["الاسم"])
         st.dataframe(df_defaulters, width='stretch')
         
         st.markdown("### 📤 إرسال الإنذار")
@@ -284,7 +285,6 @@ with tab5:
             st.markdown("#### 📂 الملفات المرفقة:")
             cols = st.columns(3)
             
-            # فحص وتأمين بيانات البطاقة الوطنية
             id_file_data = t_data.get('id_card_file')
             id_file_name = t_data.get('id_card_filename')
             if id_file_data is not None and id_file_name:
@@ -294,7 +294,6 @@ with tab5:
             else:
                 cols[0].write("البطاقة: ❌ غير متوفرة")
             
-            # فحص وتأمين بيانات عقد الكراء
             contract_file_data = t_data.get('contract_file')
             contract_file_name = t_data.get('contract_filename')
             if contract_file_data is not None and contract_file_name:
@@ -304,7 +303,6 @@ with tab5:
             else:
                 cols[1].write("عقد الكراء: ❌ غير متوفر")
             
-            # فحص وتأمين بيانات كناش التحملات
             cond_file_data = t_data.get('conditions_file')
             cond_file_name = t_data.get('conditions_filename')
             if cond_file_data is not None and cond_file_name:
@@ -402,7 +400,7 @@ with tab7:
                         c.execute("UPDATE tenants SET contract_file = %s, contract_filename = %s WHERE id = %s", (cont_bytes, cont_name, t_edit_id))
                     if new_cond:
                         cond_bytes, cond_name = get_file_data(new_cond)
-                        c.execute("UPDATE tenants SET conditions_file = %s, conditions_filename = %s WHERE id = %s", (cond_bytes, cond_name, t_edit_id))
+                        c.execute("UPDATE tenants-SET conditions_file = %s, conditions_filename = %s WHERE id = %s", (cond_bytes, cond_name, t_edit_id))
                     st.success("تم التحديث بنجاح!")
                     st.rerun()
 
