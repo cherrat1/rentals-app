@@ -33,7 +33,6 @@ c.execute("""CREATE TABLE IF NOT EXISTS tenants (
     conditions_file BYTEA, conditions_filename TEXT
 )""")
 
-# أمر إضافي للتأكد من إضافة عمود shop_category إن لم يكن موجوداً في الجدول القديم
 try:
     c.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS shop_category TEXT;")
 except:
@@ -285,17 +284,35 @@ with tab5:
             st.markdown("#### 📂 الملفات المرفقة:")
             cols = st.columns(3)
             
-            if t_data.get('id_card_filename'):
-                cols[0].download_button("📥 تحميل البطاقة", data=t_data['id_card_file'], file_name=t_data['id_card_filename'])
-            else: cols[0].write("البطاقة: ❌ غير متوفرة")
+            # فحص وتأمين بيانات البطاقة الوطنية
+            id_file_data = t_data.get('id_card_file')
+            id_file_name = t_data.get('id_card_filename')
+            if id_file_data is not None and id_file_name:
+                if isinstance(id_file_data, memoryview):
+                    id_file_data = bytes(id_file_data)
+                cols[0].download_button("📥 تحميل البطاقة", data=id_file_data, file_name=id_file_name, key=f"dl_id_{t_id}")
+            else:
+                cols[0].write("البطاقة: ❌ غير متوفرة")
             
-            if t_data.get('contract_filename'):
-                cols[1].download_button("📥 تحميل العقد", data=t_data['contract_file'], file_name=t_data['contract_filename'])
-            else: cols[1].write("عقد الكراء: ❌ غير متوفر")
+            # فحص وتأمين بيانات عقد الكراء
+            contract_file_data = t_data.get('contract_file')
+            contract_file_name = t_data.get('contract_filename')
+            if contract_file_data is not None and contract_file_name:
+                if isinstance(contract_file_data, memoryview):
+                    contract_file_data = bytes(contract_file_data)
+                cols[1].download_button("📥 تحميل العقد", data=contract_file_data, file_name=contract_file_name, key=f"dl_contract_{t_id}")
+            else:
+                cols[1].write("عقد الكراء: ❌ غير متوفر")
             
-            if t_data.get('conditions_filename'):
-                cols[2].download_button("📥 تحميل الكناش", data=t_data['conditions_file'], file_name=t_data['conditions_filename'])
-            else: cols[2].write("كناش التحملات: ❌ غير متوفر")
+            # فحص وتأمين بيانات كناش التحملات
+            cond_file_data = t_data.get('conditions_file')
+            cond_file_name = t_data.get('conditions_filename')
+            if cond_file_data is not None and cond_file_name:
+                if isinstance(cond_file_data, memoryview):
+                    cond_file_data = bytes(cond_file_data)
+                cols[2].download_button("📥 تحميل الكناش", data=cond_file_data, file_name=cond_file_name, key=f"dl_cond_{t_id}")
+            else:
+                cols[2].write("كناش التحملات: ❌ غير متوفر")
             
             st.markdown("---")
             st.markdown("### 📜 سجل الأداءات (المدفوعة)")
@@ -305,8 +322,13 @@ with tab5:
                     with st.expander(f"أداء بتاريخ: {p_row['payment_date']} | المبلغ: {p_row['amount']} درهم"):
                         st.write(f"**الأشهر المؤداة:** {p_row['paid_months_names']}")
                         st.write(f"**الموظف المستخلص:** {p_row['employee']}")
-                        if p_row.get('receipt_filename'):
-                            st.download_button("📥 تحميل صورة الوصل", data=p_row['receipt_file'], file_name=p_row['receipt_filename'], key=f"receipt_{p_row['id']}")
+                        
+                        receipt_data = p_row.get('receipt_file')
+                        receipt_name = p_row.get('receipt_filename')
+                        if receipt_data is not None and receipt_name:
+                            if isinstance(receipt_data, memoryview):
+                                receipt_data = bytes(receipt_data)
+                            st.download_button("📥 تحميل صورة الوصل", data=receipt_data, file_name=receipt_name, key=f"receipt_{p_row['id']}")
                         else:
                             st.write("صورة الوصل: ❌ غير متوفرة")
             else:
@@ -358,9 +380,12 @@ with tab7:
             current_phone = res_tenant[0] if res_tenant else ""
             current_category = res_tenant[1] if res_tenant and res_tenant[1] else "محلات صنف 1"
             
+            cat_options = ["بيع الدواجن", "بيع اللحوم", "المطاعم", "محلات صنف 1", "محلات صنف 2", "أصناف أخرى"]
+            cat_index = cat_options.index(current_category) if current_category in cat_options else 3
+            
             with st.form("edit_tenant_form"):
                 new_phone = st.text_input("تحديث رقم الهاتف:", value=current_phone if current_phone else "")
-                new_category = st.selectbox("تحديث صنف المحل:", options=["بيع الدواجن", "بيع اللحوم", "المطاعم", "محلات صنف 1", "محلات صنف 2", "أصناف أخرى"], index=0 if current_category not in ["بيع الدواجن", "بيع اللحوم", "المطاعم", "محلات صنف 1", "محلات صنف 2", "أصناف أخرى"] else ["بيع الدواجن", "بيع اللحوم", "المطاعم", "محلات صنف 1", "محلات صنف 2", "أصناف أخرى"].index(current_category))
+                new_category = st.selectbox("تحديث صنف المحل:", options=cat_options, index=cat_index)
                 
                 st.markdown("**إضافة أو تحديث المرفقات:**")
                 new_id_card = st.file_uploader("رفع/تحديث نسخة البطاقة", type=["pdf", "png", "jpg", "jpeg"], key="edit_id")
