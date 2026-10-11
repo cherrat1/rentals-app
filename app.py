@@ -9,7 +9,7 @@ import io
 # 1. إعداد الاتصال بقاعدة البيانات السحابية مع ترميز كلمة السر تلقائياً
 @st.cache_resource
 def init_connection():
-    password = urllib.parse.quote_plus("4m-sA.XRZZu!8BW")
+    password = urllib.parse.quote_plus("KB9SX9JCU9rnWEHd")
     db_url = f"postgresql://postgres:{password}@db.cncdkxgkybutccqthvxq.supabase.co:5432/postgres"
     return psycopg2.connect(db_url)
 
