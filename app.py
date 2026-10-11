@@ -22,7 +22,7 @@ def get_file_data(uploaded_file):
         return uploaded_file.getvalue(), uploaded_file.name
     return None, None
 
-# 2. إنشاء الجداول السحابية مع إضافة صنف المحل
+# 2. إنشاء الجداول السحابية والتأكد من وجود الأعمدة
 c.execute("""CREATE TABLE IF NOT EXISTS tenants (
     id SERIAL PRIMARY KEY, 
     name TEXT, cin TEXT, address TEXT, 
@@ -32,6 +32,12 @@ c.execute("""CREATE TABLE IF NOT EXISTS tenants (
     contract_file BYTEA, contract_filename TEXT,
     conditions_file BYTEA, conditions_filename TEXT
 )""")
+
+# أمر إضافي للتأكد من إضافة عمود shop_category إن لم يكن موجوداً في الجدول القديم
+try:
+    c.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS shop_category TEXT;")
+except:
+    pass
 
 c.execute("""CREATE TABLE IF NOT EXISTS payments (
     id SERIAL PRIMARY KEY, 
@@ -85,7 +91,6 @@ with tab1:
             cin = st.text_input("رقم البطاقة الوطنية")
             address = st.text_input("عنوان أو رقم المحل")
             
-            # قائمة صنف المحل
             shop_category = st.selectbox("صنف المحل *", options=[
                 "بيع الدواجن", 
                 "بيع اللحوم", 
