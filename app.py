@@ -183,8 +183,18 @@ with tab3:
     start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1))
     end_d = d2.date_input("إلى تاريخ", value=datetime.today())
     
-    query = f"SELECT tenant_name AS 'اسم المكتري', months_paid AS 'عدد الأشهر', paid_months_names AS 'الأشهر المؤداة', amount AS 'المبلغ', payment_date AS 'تاريخ الأداء', employee AS 'الموظف' FROM payments WHERE payment_date BETWEEN '{start_d}' AND '{end_d}'"
-    df = pd.read_sql_query(query, conn)
+    # استخدام الاستعلام الآمن المعلم بـ %s لتجنب أخطاء SyntaxError
+    query = """
+        SELECT tenant_name AS "اسم المكتري", 
+               months_paid AS "عدد الأشهر", 
+               paid_months_names AS "الأشهر المؤداة", 
+               amount AS "المبلغ", 
+               payment_date AS "تاريخ الأداء", 
+               employee AS "الموظف" 
+        FROM payments 
+        WHERE payment_date BETWEEN %s AND %s
+    """
+    df = pd.read_sql_query(query, conn, params=(str(start_d), str(end_d)))
     
     if not df.empty:
         st.dataframe(df, width='stretch')
