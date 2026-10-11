@@ -22,11 +22,12 @@ def get_file_data(uploaded_file):
         return uploaded_file.getvalue(), uploaded_file.name
     return None, None
 
-# 2. إنشاء الجداول السحابية (مرة واحدة فقط)
+# 2. إنشاء الجداول السحابية مع إضافة صنف المحل
 c.execute("""CREATE TABLE IF NOT EXISTS tenants (
     id SERIAL PRIMARY KEY, 
     name TEXT, cin TEXT, address TEXT, 
     contract_id TEXT, start_date TEXT, rent_price REAL, phone TEXT,
+    shop_category TEXT,
     id_card_file BYTEA, id_card_filename TEXT,
     contract_file BYTEA, contract_filename TEXT,
     conditions_file BYTEA, conditions_filename TEXT
@@ -82,7 +83,18 @@ with tab1:
             name = st.text_input("الاسم الكامل *")
             phone = st.text_input("رقم الهاتف (للتواصل عبر الواتساب)")
             cin = st.text_input("رقم البطاقة الوطنية")
-            address = st.text_input("عنوان المحل")
+            address = st.text_input("عنوان أو رقم المحل")
+            
+            # قائمة صنف المحل
+            shop_category = st.selectbox("صنف المحل *", options=[
+                "بيع الدواجن", 
+                "بيع اللحوم", 
+                "المطاعم", 
+                "محلات صنف 1", 
+                "محلات صنف 2", 
+                "أصناف أخرى"
+            ])
+            
             contract = st.text_input("رقم عقد الكراء")
             start_date = st.date_input("تاريخ بداية الكراء")
             rent_price = st.number_input("ثمن الكراء الشهري (درهم) *", min_value=0.0, step=100.0)
@@ -98,10 +110,10 @@ with tab1:
                     contract_bytes, contract_name = get_file_data(contract_file)
                     cond_bytes, cond_name = get_file_data(conditions_file)
                     
-                    c.execute("""INSERT INTO tenants (name,cin,address,contract_id,start_date,rent_price,phone,
+                    c.execute("""INSERT INTO tenants (name, cin, address, shop_category, contract_id, start_date, rent_price, phone,
                                  id_card_file, id_card_filename, contract_file, contract_filename, conditions_file, conditions_filename) 
-                                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                              (name, cin, address, contract, str(start_date), rent_price, phone, 
+                                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                              (name, cin, address, shop_category, contract, str(start_date), rent_price, phone, 
                                id_bytes, id_name, contract_bytes, contract_name, cond_bytes, cond_name))
                     st.success("تم حفظ المكتري ومرفقاته بنجاح!")
                 else:
@@ -118,15 +130,16 @@ with tab1:
                     if t_name.strip() != "":
                         t_cin = str(row.iloc[1]) if len(row) > 1 and pd.notna(row.iloc[1]) else ""
                         t_address = str(row.iloc[2]) if len(row) > 2 and pd.notna(row.iloc[2]) else ""
-                        t_contract = str(row.iloc[3]) if len(row) > 3 and pd.notna(row.iloc[3]) else ""
-                        raw_date = row.iloc[4] if len(row) > 4 and pd.notna(row.iloc[4]) else datetime.today().date()
+                        t_category = str(row.iloc[3]) if len(row) > 3 and pd.notna(row.iloc[3]) else "محلات صنف 1"
+                        t_contract = str(row.iloc[4]) if len(row) > 4 and pd.notna(row.iloc[4]) else ""
+                        raw_date = row.iloc[5] if len(row) > 5 and pd.notna(row.iloc[5]) else datetime.today().date()
                         t_date = raw_date.strftime("%Y-%m-%d") if isinstance(raw_date, datetime) else str(datetime.today().date())
-                        t_rent = float(row.iloc[5]) if len(row) > 5 and pd.notna(row.iloc[5]) else 0.0
-                        t_phone = str(row.iloc[6]) if len(row) > 6 and pd.notna(row.iloc[6]) else ""
+                        t_rent = float(row.iloc[6]) if len(row) > 6 and pd.notna(row.iloc[6]) else 0.0
+                        t_phone = str(row.iloc[7]) if len(row) > 7 and pd.notna(row.iloc[7]) else ""
                         
-                        c.execute("""INSERT INTO tenants (name,cin,address,contract_id,start_date,rent_price,phone) 
-                                     VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-                                  (t_name, t_cin, t_address, t_contract, t_date, t_rent, t_phone))
+                        c.execute("""INSERT INTO tenants (name, cin, address, shop_category, contract_id, start_date, rent_price, phone) 
+                                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                                  (t_name, t_cin, t_address, t_category, t_contract, t_date, t_rent, t_phone))
                 st.success(f"تم استيراد {len(df_excel)} مكتري بنجاح!")
 
 # الواجهة 2: تسجيل الأداءات
@@ -215,8 +228,8 @@ with tab4:
         unpaid_count, unpaid_names, _, _ = get_due_status(row['start_date'], row['id'])
         if unpaid_count > 0:
             defaulters.append({
-                "الاسم": row['name'], "البطاقة": row['cin'], "الهاتف": row.get('phone', ''),
-                "العنوان": row['address'], "ثمن الكراء": row['rent_price'],
+                "الاسم": row['name'], "البطاقة": row['cin'], "الصنف": row.get('shop_category', ''),
+                "الهاتف": row.get('phone', ''), "العنوان": row['address'], "ثمن الكراء": row['rent_price'],
                 "عدد أشهر التأخير": unpaid_count, "المبلغ المتأخر": unpaid_count * row['rent_price'],
                 "الأشهر المتأخرة": "، ".join(unpaid_names)
             })
@@ -231,7 +244,7 @@ with tab4:
             d_info = df_defaulters[df_defaulters["الاسم"] == selected_defaulter].iloc[0]
             letter = f"""إلى السيد(ة): {d_info['الاسم']}
 الحامل لبطاقة التعريف الوطنية رقم: {d_info['البطاقة']}
-العنوان (المحل): {d_info['العنوان']}
+العنوان (المحل): {d_info['العنوان']} ({d_info['الصنف']})
 
 الموضوع: إنذار بأداء واجبات الكراء المتأخرة.
 
@@ -261,7 +274,8 @@ with tab5:
             t_id = t_data['id']
             
             st.markdown(f"### 👤 بيانات المكتري: {t_data['name']}")
-            st.write(f"**البطاقة الوطنية:** {t_data['cin']} | **الهاتف:** {t_data.get('phone', 'غير متوفر')} | **ثمن الكراء:** {t_data['rent_price']} درهم")
+            st.write(f"**البطاقة الوطنية:** {t_data['cin']} | **صنف المحل:** {t_data.get('shop_category', 'غير متوفر')} | **الهاتف:** {t_data.get('phone', 'غير متوفر')}")
+            st.write(f"**العنوان:** {t_data['address']} | **ثمن الكراء:** {t_data['rent_price']} درهم")
             
             st.markdown("#### 📂 الملفات المرفقة:")
             cols = st.columns(3)
@@ -334,19 +348,22 @@ with tab7:
         
         with colA:
             st.markdown("#### 📝 تعديل بيانات ومرفقات المكتري")
-            c.execute("SELECT phone FROM tenants WHERE id = %s", (t_edit_id,))
-            res_phone = c.fetchone()
-            current_phone = res_phone[0] if res_phone else ""
+            c.execute("SELECT phone, shop_category FROM tenants WHERE id = %s", (t_edit_id,))
+            res_tenant = c.fetchone()
+            current_phone = res_tenant[0] if res_tenant else ""
+            current_category = res_tenant[1] if res_tenant and res_tenant[1] else "محلات صنف 1"
             
             with st.form("edit_tenant_form"):
                 new_phone = st.text_input("تحديث رقم الهاتف:", value=current_phone if current_phone else "")
+                new_category = st.selectbox("تحديث صنف المحل:", options=["بيع الدواجن", "بيع اللحوم", "المطاعم", "محلات صنف 1", "محلات صنف 2", "أصناف أخرى"], index=0 if current_category not in ["بيع الدواجن", "بيع اللحوم", "المطاعم", "محلات صنف 1", "محلات صنف 2", "أصناف أخرى"] else ["بيع الدواجن", "بيع اللحوم", "المطاعم", "محلات صنف 1", "محلات صنف 2", "أصناف أخرى"].index(current_category))
+                
                 st.markdown("**إضافة أو تحديث المرفقات:**")
                 new_id_card = st.file_uploader("رفع/تحديث نسخة البطاقة", type=["pdf", "png", "jpg", "jpeg"], key="edit_id")
                 new_contract = st.file_uploader("رفع/تحديث نسخة العقد", type=["pdf", "png", "jpg", "jpeg"], key="edit_contract")
                 new_cond = st.file_uploader("رفع/تحديث كناش التحملات", type=["pdf", "png", "jpg", "jpeg"], key="edit_cond")
                 
                 if st.form_submit_button("حفظ التعديلات"):
-                    c.execute("UPDATE tenants SET phone = %s WHERE id = %s", (new_phone, t_edit_id))
+                    c.execute("UPDATE tenants SET phone = %s, shop_category = %s WHERE id = %s", (new_phone, new_category, t_edit_id))
                     if new_id_card:
                         id_bytes, id_name = get_file_data(new_id_card)
                         c.execute("UPDATE tenants SET id_card_file = %s, id_card_filename = %s WHERE id = %s", (id_bytes, id_name, t_edit_id))
