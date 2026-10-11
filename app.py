@@ -6,11 +6,12 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import io
 
-# 1. إعداد الاتصال بقاعدة البيانات السحابية مع ترميز كلمة السر تلقائياً
+# 1. إعداد الاتصال بقاعدة البيانات السحابية (Pooling)
 @st.cache_resource
 def init_connection():
-    password = urllib.parse.quote_plus("KB9SX9JCU9rnWEHd")
-    db_url = f"postgresql://postgres:{password}@db.cncdkxgkybutccqthvxq.supabase.co:5432/postgres"
+    password = urllib.parse.quote_plus("4m-sA.XRZZu!8BW")
+    # الرابط الجديد الخاص بك مع وضع كلمة المرور المشفرة تلقائياً
+    db_url = f"postgresql://postgres.cncdkxgkybutccqthvxq:KB9SX9JCU9rnWEHd@aws-1-eu-west-3.pooler.supabase.com:6543/postgres"
     return psycopg2.connect(db_url)
 
 conn = init_connection()
