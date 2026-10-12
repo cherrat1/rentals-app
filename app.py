@@ -15,12 +15,14 @@ def init_connection():
 
 conn = init_connection()
 conn.autocommit = True
-c = conn.cursor()
 
 def get_file_data(uploaded_file):
     if uploaded_file is not None:
         return uploaded_file.getvalue(), uploaded_file.name
     return None, None
+
+# إنشاء مؤشر عام لتنفيذ الأوامر البسيطة
+c = conn.cursor()
 
 # 2. إنشاء الجداول السحابية والتأكد من وجود الأعمدة
 c.execute("""CREATE TABLE IF NOT EXISTS tenants (
@@ -54,14 +56,18 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
 ])
 
 def get_due_status(start_date_str, tenant_id):
+    # إنشاء مؤشر محلي مستقل داخل الدالة لمنع أي تعارض في الاتصال
+    local_cur = conn.cursor()
     start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
     today = datetime.today().date()
     total_months_since_start = (today.year - start_date.year) * 12 + today.month - start_date.month
     if today.day >= start_date.day:
         total_months_since_start += 1 
     
-    c.execute("SELECT SUM(months_paid) FROM payments WHERE tenant_id = %s", (tenant_id,))
-    result = c.fetchone()[0]
+    local_cur.execute("SELECT SUM(months_paid) FROM payments WHERE tenant_id = %s", (tenant_id,))
+    result = local_cur.fetchone()[0]
+    local_cur.close()
+    
     paid_months = result if result else 0
     
     unpaid_months_count = total_months_since_start - paid_months
@@ -443,77 +449,4 @@ with tab7:
                 new_cond = st.file_uploader("رفع/تحديث كناش التحملات", type=["pdf", "png", "jpg", "jpeg"], key="edit_cond")
                 
                 if st.form_submit_button("حفظ التعديلات"):
-                    c.execute("""UPDATE tenants SET phone = %s, shop_category = %s, rent_price = %s, start_date = %s WHERE id = %s""",
-                              (new_phone, new_category, new_rent, str(new_start_date), t_edit_id))
-                    if new_id_card:
-                        id_bytes, id_name = get_file_data(new_id_card)
-                        c.execute("UPDATE tenants SET id_card_file = %s, id_card_filename = %s WHERE id = %s", (id_bytes, id_name, t_edit_id))
-                    if new_contract:
-                        cont_bytes, cont_name = get_file_data(new_contract)
-                        c.execute("UPDATE tenants SET contract_file = %s, contract_filename = %s WHERE id = %s", (cont_bytes, cont_name, t_edit_id))
-                    if new_cond:
-                        cond_bytes, cond_name = get_file_data(new_cond)
-                        c.execute("UPDATE tenants SET conditions_file = %s, conditions_filename = %s WHERE id = %s", (cond_bytes, cond_name, t_edit_id))
-                    st.success("تم تحديث بيانات المكتري بنجاح!")
-                    st.rerun()
-
-        with colB:
-            st.markdown("#### ❌ حذف المكتري نهائياً")
-            confirm_delete = st.text_input("للتأكيد، اكتب كلمة 'حذف' في الخانة أدناه:")
-            if st.button("🚨 حذف المكتري"):
-                if confirm_delete == "حذف":
-                    c.execute("DELETE FROM payments WHERE tenant_id = %s", (t_edit_id,))
-                    c.execute("DELETE FROM tenants WHERE id = %s", (t_edit_id,))
-                    st.success("تم حذف المكتري بنجاح!")
-                    st.rerun()
-                else:
-                    st.warning("يجب كتابة كلمة 'حذف' لتأكيد العملية.")
-    else:
-        st.info("لا توجد مكترون ضمن هذا الصنف المحدد.")
-
-# الواجهة 8: النسخ الاحتياطي وتصدير البيانات
-with tab8:
-    st.subheader("💾 النسخ الاحتياطي وحفظ البيانات في الحاسوب")
-    st.write("يمكنك في أي وقت تحميل نسخ شاملة بصيغة Excel لجميع بيانات المكترين والعمليات المالية للاحتفاظ بها في حاسوبك.")
-    
-    col_b1, col_b2 = st.columns(2)
-    
-    with col_b1:
-        st.markdown("#### 👥 نسخة احتياطية لجميع المكترين")
-        df_all_tenants = pd.read_sql_query("""
-            SELECT name AS "الاسم الكامل", 
-                   cin AS "رقم البطاقة الوطنية", 
-                   address AS "عنوان المحل", 
-                   shop_category AS "صنف المحل", 
-                   contract_id AS "رقم العقد", 
-                   start_date AS "تاريخ البداية", 
-                   rent_price AS "ثمن الكراء", 
-                   phone AS "رقم الهاتف" 
-            FROM tenants
-        """, conn)
-        if not df_all_tenants.empty:
-            output_t = io.BytesIO()
-            with pd.ExcelWriter(output_t, engine='xlsxwriter') as writer:
-                df_all_tenants.to_excel(writer, index=False, sheet_name='المكترون')
-            st.download_button(label="📥 تحميل ملف المكترين (Excel)", data=output_t.getvalue(), file_name=f"نسخة_المكترين_{datetime.today().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.info("لا توجد بيانات مكترين حالياً.")
-            
-    with col_b2:
-        st.markdown("#### 💰 نسخة احتياطية لكافة الأداءات المالية")
-        df_all_payments = pd.read_sql_query("""
-            SELECT tenant_name AS "اسم المكتري", 
-                   months_paid AS "عدد الأشهر", 
-                   paid_months_names AS "الأشهر المؤداة", 
-                   amount AS "المبلغ المدفوع", 
-                   payment_date AS "تاريخ الأداء", 
-                   employee AS "الموظف" 
-            FROM payments
-        """, conn)
-        if not df_all_payments.empty:
-            output_p = io.BytesIO()
-            with pd.ExcelWriter(output_p, engine='xlsxwriter') as writer:
-                df_all_payments.to_excel(writer, index=False, sheet_name='الأداءات')
-            st.download_button(label="📥 تحميل ملف الأداءات (Excel)", data=output_p.getvalue(), file_name=f"نسخة_الأداءات_{datetime.today().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.info("لا توجد عمليات أداء مسجلة حتى الآن.")
+                    c.execute("""UPDATE tenants SET phone = %s, shop_category
