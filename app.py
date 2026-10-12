@@ -10,7 +10,7 @@ io = __import__('io')
 @st.cache_resource
 def init_connection():
     password = urllib.parse.quote_plus("4m-sA.XRZZu!8BW")
-db_url = f"postgresql://postgres.cncdkxgkybutccqthvxq:KB9SX9JCU9rnWEHd@aws-1-eu-west-3.pooler.supabase.com:6543/postgres"
+    db_url = f"postgresql://postgres.cncdkxgkybutccqthvxq:KB9SX9JCU9rnWEHd@aws-1-eu-west-3.pooler.supabase.com:6543/postgres"
     return psycopg2.connect(db_url)
 
 conn = init_connection()
@@ -253,7 +253,6 @@ with tab4:
         if selected_defaulter:
             d_info = df_defaulters[df_defaulters["الاسم"] == selected_defaulter].iloc[0]
             
-            # صياغة الرسالة مطابقة تماماً للنموذج الرسمي المرفق
             official_letter = f"""المملكة المغربية
 عمالة إقليم بنسليمان
 جماعة شراط
@@ -283,7 +282,6 @@ with tab4:
             
             col_btn1, col_btn2 = st.columns(2)
             
-            # زر التحميل كملف Word (Docx)
             with col_btn1:
                 docx_output = io.BytesIO()
                 docx_output.write(official_letter.encode('utf-8'))
@@ -294,7 +292,6 @@ with tab4:
                     mime="application/msword"
                 )
             
-            # زر الإرسال عبر الواتساب
             with col_btn2:
                 if d_info['الهاتف']:
                     phone_str = str(d_info['الهاتف']).replace("+", "").replace(" ", "")
