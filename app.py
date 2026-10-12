@@ -56,7 +56,6 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
 ])
 
 def get_due_status(start_date_str, tenant_id):
-    # إنشاء مؤشر محلي مستقل داخل الدالة لمنع أي تعارض في الاتصال
     local_cur = conn.cursor()
     start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
     today = datetime.today().date()
@@ -352,101 +351,4 @@ with tab5:
             if cond_file_data is not None and cond_file_name:
                 if isinstance(cond_file_data, memoryview):
                     cond_file_data = bytes(cond_file_data)
-                cols[2].download_button("📥 تحميل الكناش", data=cond_file_data, file_name=cond_file_name, key=f"dl_cond_{t_id}")
-            else:
-                cols[2].write("كناش التحملات: ❌ غير متوفر")
-            
-            st.markdown("---")
-            st.markdown("### 📜 سجل الأداءات (المدفوعة)")
-            df_payments = pd.read_sql_query("SELECT * FROM payments WHERE tenant_id = %s", conn, params=(t_id,))
-            if not df_payments.empty:
-                for index, p_row in df_payments.iterrows():
-                    with st.expander(f"أداء بتاريخ: {p_row['payment_date']} | المبلغ: {p_row['amount']} درهم"):
-                        st.write(f"**الأشهر المؤداة:** {p_row['paid_months_names']}")
-                        st.write(f"**الموظف المستخلص:** {p_row['employee']}")
-                        
-                        receipt_data = p_row.get('receipt_file')
-                        receipt_name = p_row.get('receipt_filename')
-                        if receipt_data is not None and receipt_name:
-                            if isinstance(receipt_data, memoryview):
-                                receipt_data = bytes(receipt_data)
-                            st.download_button("📥 تحميل صورة الوصل", data=receipt_data, file_name=receipt_name, key=f"receipt_{p_row['id']}")
-                        else:
-                            st.write("صورة الوصل: ❌ غير متوفرة")
-            else:
-                st.info("لم يقم هذا المكتري بأي أداء بعد.")
-        else:
-            st.warning("لا يوجد مكتري بهذا الاسم")
-
-# الواجهة 6: تصحيح الأخطاء
-with tab6:
-    st.subheader("إلغاء عملية أداء تم تسجيلها بالخطأ")
-    query_recent = """
-        SELECT id AS "رقم العملية", 
-               tenant_name AS "اسم المكتري", 
-               months_paid AS "عدد الأشهر", 
-               paid_months_names AS "الأشهر المؤداة", 
-               amount AS "المبلغ", 
-               payment_date AS "تاريخ الأداء" 
-        FROM payments 
-        ORDER BY id DESC 
-        LIMIT 50
-    """
-    df_recent = pd.read_sql_query(query_recent, conn)
-    if not df_recent.empty:
-        st.dataframe(df_recent, width='stretch')
-        c1, c2 = st.columns(2)
-        payment_id_to_delete = c1.number_input("أدخل 'رقم العملية' المراد حذفها:", min_value=0, step=1, value=0)
-        if c1.button("🗑️ حذف العملية نهائياً"):
-            if payment_id_to_delete > 0:
-                c.execute("DELETE FROM payments WHERE id = %s", (payment_id_to_delete,))
-                st.success("تم الحذف بنجاح!")
-                st.rerun()
-
-# الواجهة 7: إدارة المكترين
-with tab7:
-    st.subheader("إدارة المكترين (تعديل البيانات، الثمن، التاريخ، أو الحذف)")
-    manage_filter_cat = st.selectbox("فلترة قائمة الإدارة حسب الصنف:", options=["الكل"] + category_options, key="manage_cat_filter")
-    
-    if manage_filter_cat == "الكل":
-        tenants_edit_df = pd.read_sql_query("SELECT id, name FROM tenants", conn)
-    else:
-        tenants_edit_df = pd.read_sql_query("SELECT id, name FROM tenants WHERE shop_category = %s", conn, params=(manage_filter_cat,))
-        
-    if not tenants_edit_df.empty:
-        edit_dict = dict(zip(tenants_edit_df.name, tenants_edit_df.id))
-        selected_edit_tenant = st.selectbox("اختر المكتري للتعديل:", options=list(edit_dict.keys()))
-        t_edit_id = edit_dict[selected_edit_tenant]
-        
-        st.markdown("---")
-        colA, colB = st.columns(2)
-        
-        with colA:
-            st.markdown("#### 📝 تعديل بيانات، ثمن الكراء، وتاريخ البداية")
-            c.execute("SELECT phone, shop_category, rent_price, start_date FROM tenants WHERE id = %s", (t_edit_id,))
-            res_tenant = c.fetchone()
-            current_phone = res_tenant[0] if res_tenant else ""
-            current_category = res_tenant[1] if res_tenant and res_tenant[1] else "محلات صنف 1"
-            current_rent = float(res_tenant[2]) if res_tenant and res_tenant[2] is not None else 0.0
-            current_start_date_str = res_tenant[3] if res_tenant and res_tenant[3] else datetime.today().strftime("%Y-%m-%d")
-            
-            try:
-                parsed_start_date = datetime.strptime(current_start_date_str, "%Y-%m-%d").date()
-            except:
-                parsed_start_date = datetime.today().date()
-            
-            cat_index = category_options.index(current_category) if current_category in category_options else 3
-            
-            with st.form("edit_tenant_form"):
-                new_phone = st.text_input("تحديث رقم الهاتف:", value=current_phone if current_phone else "")
-                new_category = st.selectbox("تحديث صنف المحل:", options=category_options, index=cat_index)
-                new_rent = st.number_input("تحديث ثمن الكراء الشهري (درهم):", value=current_rent, min_value=0.0, step=100.0)
-                new_start_date = st.date_input("تحديث تاريخ بداية الكراء:", value=parsed_start_date)
-                
-                st.markdown("**إضافة أو تحديث المرفقات:**")
-                new_id_card = st.file_uploader("رفع/تحديث نسخة البطاقة", type=["pdf", "png", "jpg", "jpeg"], key="edit_id")
-                new_contract = st.file_uploader("رفع/تحديث نسخة العقد", type=["pdf", "png", "jpg", "jpeg"], key="edit_contract")
-                new_cond = st.file_uploader("رفع/تحديث كناش التحملات", type=["pdf", "png", "jpg", "jpeg"], key="edit_cond")
-                
-                if st.form_submit_button("حفظ التعديلات"):
-                    c.execute("""UPDATE tenants SET phone = %s, shop_category
+                cols[2].download_button("
