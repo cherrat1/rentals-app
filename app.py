@@ -153,7 +153,6 @@ with tab1:
                 
                 imported_count = 0
                 for index, row in df_excel.iterrows():
-                    # قراءة الاسم الكامل
                     t_name = ""
                     for col in df_excel.columns:
                         if "الاسم" in str(col) or "اسم" in str(col):
@@ -162,7 +161,6 @@ with tab1:
                             
                     if t_name.strip() != "" and t_name.strip() != "nan":
                         
-                        # قراءة تاريخ البداية
                         raw_date = datetime.today().date()
                         for col in df_excel.columns:
                             if "تاريخ" in str(col) or "بداية" in str(col):
@@ -173,7 +171,6 @@ with tab1:
                         except:
                             t_date = str(datetime.today().date())
                             
-                        # قراءة ثمن الكراء بدقة فائقة من عمود "ثمن الكراء" أو ما يشابهه
                         t_rent = 0.0
                         for col in df_excel.columns:
                             if "ثمن" in str(col) or "المبلغ" in str(col):
@@ -184,7 +181,6 @@ with tab1:
                                         t_rent = float(clean_val)
                                 break
                         
-                        # قراءة رقم البطاقة
                         t_cin = ""
                         for col in df_excel.columns:
                             if "بطاقة" in str(col) or "CIN" in str(col):
@@ -192,7 +188,6 @@ with tab1:
                                 if pd.notna(val): t_cin = str(val)
                                 break
                                 
-                        # قراءة عنوان المحل
                         t_address = ""
                         for col in df_excel.columns:
                             if "عنوان" in str(col) or "محل" in str(col):
@@ -200,7 +195,6 @@ with tab1:
                                 if pd.notna(val): t_address = str(val)
                                 break
                                 
-                        # قراءة عقد الكراء
                         t_contract = ""
                         for col in df_excel.columns:
                             if "عقد" in str(col) and "ثمن" not in str(col):
@@ -208,7 +202,6 @@ with tab1:
                                 if pd.notna(val): t_contract = str(val)
                                 break
                         
-                        # تحديد الصنف
                         t_category = excel_default_category
                         for col in df_excel.columns:
                             if "صنف" in str(col) or "نوع" in str(col):
@@ -311,7 +304,7 @@ with tab3:
     else:
         st.warning("لا توجد أداءات في هذه الفترة.")
 
-# الواجهة 4: المتقاعسون والرسالة النموذجية الرسمية
+# الواجهة 4: المتقاعسون والرسائل الرسمية (الأولى، الثانية، وطلب الإلغاء)
 with tab4:
     st.subheader("الإنذارات وإرسال الرسائل الرسمية للمتقاعسين")
     defaulter_filter_cat = st.selectbox("فلترة المتقاعسين حسب الصنف:", options=["الكل"] + category_options, key="def_cat_filter")
@@ -338,16 +331,16 @@ with tab4:
         df_defaulters = pd.DataFrame(defaulters).drop_duplicates(subset=["الاسم"])
         st.dataframe(df_defaulters, width='stretch')
         
-        st.markdown("### 📄 المعاينة الرسمية لرسالة الإنذار")
-        selected_defaulter = st.selectbox("اختر المكتري لإنشاء رسالة الإنذار:", options=df_defaulters["الاسم"])
+        st.markdown("### 📄 المعاينة الرسمية للرسائل والطلبات")
+        selected_defaulter = st.selectbox("اختر المكتري لإنشاء المراسلات:", options=df_defaulters["الاسم"])
         if selected_defaulter:
             d_info = df_defaulters[df_defaulters["الاسم"] == selected_defaulter].iloc[0]
             
-            official_letter = f"""المملكة المغربية
+            # نص الرسالة الأولى (إنذار أول)
+            letter_1 = f"""المملكة المغربية
 عمالة إقليم بنسليمان
 جماعة شراط
 مصلحة الشؤون المالية و الاقتصادية
-الموارد المالية
 
 شراط في: {datetime.today().strftime('%Y-%m-%d')}
 
@@ -356,39 +349,83 @@ with tab4:
 رقم البطاقة الوطنية: {d_info['البطاقة']}
 العنوان (المحل): {d_info['العنوان']} ({d_info['الصنف']})
 
-الموضوع: إنذار بأداء واجبات الكراء.
+الموضوع: إنذار أول بأداء واجبات الكراء.
 
 سلام تام بوجود مولانا الإمام،
 وبعد، أخبركم أنكم لم تقوموا بأداء الكراء الشهري عن الأشهر التالية:
 ({d_info['الأشهر المتأخرة']})
 
-لذا انتم مطالبون بتسوية وضعيتكم الجبائية تجاه الجماعة في أقرب وقت، و ذلك داخل أجل 15 يوما من تاريخ تسلمكم هذه الرسالة.
-و نذكركم أنه في حالة عدم تسديد هذا الرسم الذي أصبح ملزماً عليكم، فإن الجماعة ستتخذ جميع الإجراءات الإدارية و القانونية اللازمة لذلك، كما هو مبين في كناش التحملات و عقد الكراء.
+لذا أنتم مطالبون بتسوية وضعيتكم الجبائية تجاه الجماعة في أقرب وقت، وذلك داخل أجل 15 يوما من تاريخ تسلمكم هذه الرسالة.
 
 والسلام
 امضاء الرئيس:"""
 
-            st.text_area("نص الرسالة الرسمية:", official_letter, height=280)
+            # نص الرسالة الثانية (إنذار نهائي)
+            letter_2 = f"""المملكة المغربية
+عمالة إقليم بنسليمان
+جماعة شراط
+مصلحة الشؤون المالية و الاقتصادية
+
+شراط في: {datetime.today().strftime('%Y-%m-%d')}
+
+من رئيس المجلس الجماعي لشراط
+إلى السيد(ة): {d_info['الاسم']}
+رقم البطاقة الوطنية: {d_info['البطاقة']}
+العنوان (المحل): {d_info['العنوان']} ({d_info['الصنف']})
+
+الموضوع: إنذار ثاني ونهائي بأداء واجبات الكراء.
+
+سلام تام بوجود مولانا الإمام،
+وبعد، إلحاقاً بالإنذار الأول، ونظراً لتمرسكم في عدم تسديد واجبات الكراء عن الأشهر:
+({d_info['الأشهر المتأخرة']})
+
+نخبركم أن هذا إنذار نهائي داخل أجل 7 أيام، وفي حالة التخلف، ستضطر الجماعة لاتخاذ الإجراءات القانونية والإدارية لسحب المحل وفرض المساطر الجبائية المعمول بها.
+
+والسلام
+امضاء الرئيس:"""
+
+            # طلب إلغاء الاستفادة / العقد
+            cancellation_request = f"""إلى السيد: رئيس المجلس الجماعي لشراط
+الموضوع: طلب إلغاء استغلال المحل التجاري / عقد الكراء.
+
+سلام تام بوجود مولانا الإمام،
+أنا الموقعة أسفله:
+الاسم الكامل: {d_info['الاسم']}
+رقم البطاقة الوطنية: {d_info['البطاقة']}
+رقم المحل / العنوان: {d_info['العنوان']} ({d_info['الصنف']})
+
+أتقدم إلىسيادتكم بطلبي هذا قصد الموافقة على إلغاء استفادتي من المحل التجاري المذكور أعلاه وتسليم م مفاتيحه للجماعة، نظراً لظروفي الخاصة، مع إبراء ذمتي المالية.
+
+وتفضلوا بقبول فائق الاحترام والتقدير.
+
+الإمضاء:
+التاريخ: {datetime.today().strftime('%Y-%m-%d')}"""
+
+            tab_l1, tab_l2, tab_canc = st.tabs(["📩 الرسالة الأولى", "⚠️ الرسالة الثانية", "📝 طلب إلغاء (في حال الطلب)"])
             
-            col_btn1, col_btn2 = st.columns(2)
+            with tab_l1:
+                st.text_area("نص الرسالة الأولى:", letter_1, height=220, key="txt_l1")
+                doc1 = io.BytesIO()
+                doc1.write(letter_1.encode('utf-8'))
+                st.download_button("📥 تحميل الرسالة الأولى (Word/Text)", data=doc1.getvalue(), file_name=f"الإنذار_الأول_{d_info['الاسم']}.doc", mime="application/msword")
             
-            with col_btn1:
-                docx_output = io.BytesIO()
-                docx_output.write(official_letter.encode('utf-8'))
-                st.download_button(
-                    label="📥 تحميل الرسالة كملف جاهز (Word/Text)",
-                    data=docx_output.getvalue(),
-                    file_name=f"إنذار_{d_info['الاسم']}.doc",
-                    mime="application/msword"
-                )
-            
-            with col_btn2:
-                if d_info['الهاتف']:
-                    phone_str = str(d_info['الهاتف']).replace("+", "").replace(" ", "")
-                    wa_link = f"https://wa.me/{phone_str}?text={urllib.parse.quote(official_letter)}"
-                    st.markdown(f'<a href="{wa_link}" target="_blank" style="background-color:#25D366; color:white; padding:10px 20px; text-decoration:none; border-radius:5px; font-weight:bold; display:inline-block; text-align:center; width:100%;">📲 إرسال الإنذار عبر الواتساب</a>', unsafe_allow_html=True)
-                else:
-                    st.warning("رقم الهاتف غير متوفر لهذا المكتري لإرساله عبر الواتساب.")
+            with tab_l2:
+                st.text_area("نص الرسالة الثانية:", letter_2, height=220, key="txt_l2")
+                doc2 = io.BytesIO()
+                doc2.write(letter_2.encode('utf-8'))
+                st.download_button("📥 تحميل الرسالة الثانية (Word/Text)", data=doc2.getvalue(), file_name=f"الإنذار_الثاني_{d_info['الاسم']}.doc", mime="application/msword")
+                
+            with tab_canc:
+                st.text_area("نص طلب الإلغاء:", cancellation_request, height=220, key="txt_canc")
+                doc_canc = io.BytesIO()
+                doc_canc.write(cancellation_request.encode('utf-8'))
+                st.download_button("📥 تحميل نموذج طلب الإلغاء (Word/Text)", data=doc_canc.getvalue(), file_name=f"طلب_إلغاء_{d_info['الاسم']}.doc", mime="application/msword")
+
+            st.markdown("---")
+            if d_info['الهاتف']:
+                phone_str = str(d_info['الهاتف']).replace("+", "").replace(" ", "")
+                wa_link = f"https://wa.me/{phone_str}?text={urllib.parse.quote(letter_1)}"
+                st.markdown(f'<a href="{wa_link}" target="_blank" style="background-color:#25D366; color:white; padding:10px 20px; text-decoration:none; border-radius:5px; font-weight:bold; display:inline-block; text-align:center; width:100%;">📲 إرسال الإنذار الأول عبر الواتساب</a>', unsafe_allow_html=True)
     else:
         st.success("لا يوجد أي متقاعسين حالياً في هذا الصنف.")
 
@@ -487,9 +524,9 @@ with tab6:
                 st.success("تم الحذف بنجاح!")
                 st.rerun()
 
-# الواجهة 7: إدارة المكترين
+# الواجهة 7: إدارة المكترين (مع إمكانية تعديل العنوان)
 with tab7:
-    st.subheader("إدارة المكترين (تعديل البيانات، الثمن، التاريخ، أو الحذف)")
+    st.subheader("إدارة المكترين (تعديل البيانات، العنوان، الثمن، التاريخ، أو الحذف)")
     manage_filter_cat = st.selectbox("فلترة قائمة الإدارة حسب الصنف:", options=["الكل"] + category_options, key="manage_cat_filter")
     
     if manage_filter_cat == "الكل":
@@ -507,12 +544,13 @@ with tab7:
         colA, colB = st.columns(2)
         
         with colA:
-            c.execute("SELECT phone, shop_category, rent_price, start_date FROM tenants WHERE id = %s", (t_edit_id,))
+            c.execute("SELECT phone, shop_category, rent_price, start_date, address FROM tenants WHERE id = %s", (t_edit_id,))
             res_tenant = c.fetchone()
             current_phone = res_tenant[0] if res_tenant else ""
             current_category = res_tenant[1] if res_tenant and res_tenant[1] else "محلات صنف 1"
             current_rent = float(res_tenant[2]) if res_tenant and res_tenant[2] is not None else 0.0
             current_start_date_str = res_tenant[3] if res_tenant and res_tenant[3] else datetime.today().strftime("%Y-%m-%d")
+            current_address = res_tenant[4] if res_tenant and res_tenant[4] else ""
             
             try:
                 parsed_start_date = datetime.strptime(str(current_start_date_str), "%Y-%m-%d").date()
@@ -522,6 +560,7 @@ with tab7:
             cat_index = category_options.index(current_category) if current_category in category_options else 3
             
             with st.form("edit_tenant_form"):
+                new_address = st.text_input("تحديث عنوان أو رقم المحل:", value=current_address)
                 new_phone = st.text_input("تحديث رقم الهاتف:", value=current_phone if current_phone else "")
                 new_category = st.selectbox("تحديث صنف المحل:", options=category_options, index=cat_index)
                 new_rent = st.number_input("تحديث ثمن الكراء الشهري (درهم):", value=current_rent, min_value=0.0, step=100.0)
@@ -534,8 +573,8 @@ with tab7:
                 
                 if st.form_submit_button("حفظ التعديلات"):
                     c.execute(
-                        "UPDATE tenants SET phone = %s, shop_category = %s, rent_price = %s, start_date = %s WHERE id = %s",
-                        (new_phone, new_category, new_rent, str(new_start_date), t_edit_id)
+                        "UPDATE tenants SET address = %s, phone = %s, shop_category = %s, rent_price = %s, start_date = %s WHERE id = %s",
+                        (new_address, new_phone, new_category, new_rent, str(new_start_date), t_edit_id)
                     )
                     if new_id_card:
                         id_bytes, id_name = get_file_data(new_id_card)
@@ -546,7 +585,7 @@ with tab7:
                     if new_cond:
                         cond_bytes, cond_name = get_file_data(new_cond)
                         c.execute("UPDATE tenants SET conditions_file = %s, conditions_filename = %s WHERE id = %s", (cond_bytes, cond_name, t_edit_id))
-                    st.success("تم تحديث بيانات المكتري بنجاح!")
+                    st.success("تم تحديث بيانات المكتري والعنوان بنجاح!")
                     st.rerun()
 
         with colB:
