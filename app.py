@@ -10,7 +10,7 @@ io = __import__('io')
 @st.cache_resource
 def init_connection():
     password = urllib.parse.quote_plus("4m-sA.XRZZu!8BW")
-    db_url = f"postgresql://postgres.cncdkxgkybutccqthvxq:{password}@aws-1-eu-west-3.pooler.supabase.com:6543/postgres"
+    db_url = f"postgresql://postgres.cncdkxgkybutccqthvxq:KB9SX9JCU9rnWEHd@aws-1-eu-west-3.pooler.supabase.com:6543/postgres"
     return psycopg2.connect(db_url)
 
 conn = init_connection()
