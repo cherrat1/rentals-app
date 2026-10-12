@@ -151,48 +151,73 @@ with tab1:
             df_excel = pd.read_excel(uploaded_file)
             if st.button("تأكيد استيراد البيانات"):
                 
-                def get_val(row, hints, default_val=""):
-                    for col in df_excel.columns:
-                        for hint in hints:
-                            if hint in str(col):
-                                val = row[col]
-                                return val if pd.notna(val) else default_val
-                    return default_val
-                
                 imported_count = 0
                 for index, row in df_excel.iterrows():
-                    t_name = str(get_val(row, ["الاسم", "اسم"]))
+                    # قراءة الاسم الكامل
+                    t_name = ""
+                    for col in df_excel.columns:
+                        if "الاسم" in str(col) or "اسم" in str(col):
+                            t_name = str(row[col])
+                            break
+                            
                     if t_name.strip() != "" and t_name.strip() != "nan":
                         
-                        raw_date = get_val(row, ["تاريخ", "بداية"], datetime.today().date())
+                        # قراءة تاريخ البداية
+                        raw_date = datetime.today().date()
+                        for col in df_excel.columns:
+                            if "تاريخ" in str(col) or "بداية" in str(col):
+                                raw_date = row[col]
+                                break
                         try:
                             t_date = pd.to_datetime(raw_date).strftime("%Y-%m-%d")
                         except:
                             t_date = str(datetime.today().date())
                             
-                        # البحث الدقيق عن ثمن الكراء (يبدأ بكلمة ثمن أو مبلغ أولاً قبل الكراء لتجنب تداخل عقد الكراء)
-                        raw_rent = get_val(row, ["ثمن", "المبلغ", "الكراء"], 0.0)
-                        try:
-                            clean_rent_str = "".join(ch for ch in str(raw_rent) if ch.isdigit() or ch == '.')
-                            t_rent = float(clean_rent_str) if clean_rent_str else 0.0
-                        except:
-                            t_rent = 0.0
-                            
-                        t_cin = str(get_val(row, ["بطاقة", "وطنية", "CIN"]))
-                        t_address = str(get_val(row, ["عنوان", "محل"]))
-                        t_contract = str(get_val(row, ["عقد"]))
+                        # قراءة ثمن الكراء بدقة فائقة من عمود "ثمن الكراء" أو ما يشابهه
+                        t_rent = 0.0
+                        for col in df_excel.columns:
+                            if "ثمن" in str(col) or "المبلغ" in str(col):
+                                val = row[col]
+                                if pd.notna(val):
+                                    clean_val = "".join(ch for ch in str(val) if ch.isdigit() or ch == '.')
+                                    if clean_val:
+                                        t_rent = float(clean_val)
+                                break
                         
-                        raw_cat_excel = str(get_val(row, ["صنف", "نوع", "فئة", "نشاط"])).strip()
-                        if raw_cat_excel != "" and raw_cat_excel != "nan":
-                            t_category = raw_cat_excel
-                        else:
-                            t_category = excel_default_category
-                            
+                        # قراءة رقم البطاقة
+                        t_cin = ""
+                        for col in df_excel.columns:
+                            if "بطاقة" in str(col) or "CIN" in str(col):
+                                val = row[col]
+                                if pd.notna(val): t_cin = str(val)
+                                break
+                                
+                        # قراءة عنوان المحل
+                        t_address = ""
+                        for col in df_excel.columns:
+                            if "عنوان" in str(col) or "محل" in str(col):
+                                val = row[col]
+                                if pd.notna(val): t_address = str(val)
+                                break
+                                
+                        # قراءة عقد الكراء
+                        t_contract = ""
+                        for col in df_excel.columns:
+                            if "عقد" in str(col) and "ثمن" not in str(col):
+                                val = row[col]
+                                if pd.notna(val): t_contract = str(val)
+                                break
+                        
+                        # تحديد الصنف
+                        t_category = excel_default_category
+                        for col in df_excel.columns:
+                            if "صنف" in str(col) or "نوع" in str(col):
+                                val = row[col]
+                                if pd.notna(val) and str(val).strip() != "nan":
+                                    t_category = str(val).strip()
+                                break
+                                
                         t_phone = ""
-                        
-                        if t_cin == "nan": t_cin = ""
-                        if t_address == "nan": t_address = ""
-                        if t_contract == "nan": t_contract = ""
                         
                         c.execute(
                             "INSERT INTO tenants (name, cin, address, shop_category, contract_id, start_date, rent_price, phone) "
@@ -201,7 +226,7 @@ with tab1:
                         )
                         imported_count += 1
                         
-                st.success(f"تم بنجاح استيراد {imported_count} مكتري، وتثبيت ثمن الكراء وتواريخ البداية بدقة!")
+                st.success(f"تم بنجاح استيراد {imported_count} مكتري، وتثبيت ثمن الكراء وتواريخ البداية بدقة تامة!")
 
 # الواجهة 2: تسجيل الأداءات
 with tab2:
