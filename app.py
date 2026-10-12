@@ -62,7 +62,6 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
 
 def get_due_status(start_date_str, tenant_id):
     local_cur = conn.cursor()
-    # تحويل الأنواع لتفادي أخطاء numpy/pandas
     clean_tenant_id = int(tenant_id)
     clean_start_date_str = str(start_date_str)
     
@@ -92,7 +91,14 @@ def get_due_status(start_date_str, tenant_id):
     unpaid_names = next_months_names[:int(unpaid_months_count)]
     return unpaid_months_count, unpaid_names, next_months_names, paid_months
 
-category_options = ["بيع الدواجن", "بيع اللحوم", "المطاعم", "محلات صنف 1", "محلات صنف 2", "أصناف أخرى"]
+# 3. جلب الأصناف المتاحة ديناميكياً لتحديث الفلاتر
+default_categories = ["بيع الدواجن", "بيع اللحوم", "المطاعم", "محلات صنف 1", "محلات صنف 2", "أصناف أخرى"]
+try:
+    c.execute("SELECT DISTINCT shop_category FROM tenants WHERE shop_category IS NOT NULL AND shop_category != ''")
+    db_categories = [row[0] for row in c.fetchall()]
+    category_options = list(dict.fromkeys(default_categories + db_categories))
+except:
+    category_options = default_categories
 
 # الواجهة 1: إدخال المكترين
 with tab1:
@@ -135,26 +141,60 @@ with tab1:
                     
     with col2:
         st.markdown("**استيراد المكترين من ملف Excel 📥**")
+        
+        excel_default_category = st.selectbox("اختر الصنف الذي ينتمي له هؤلاء المكترون:", options=category_options, key="excel_cat")
+        
         uploaded_file = st.file_uploader("اختر ملف Excel (.xlsx)", type=["xlsx"])
         if uploaded_file is not None:
             df_excel = pd.read_excel(uploaded_file)
             if st.button("تأكيد استيراد البيانات"):
+                
+                def get_val(row, hints, default_val=""):
+                    for col in df_excel.columns:
+                        for hint in hints:
+                            if hint in str(col):
+                                val = row[col]
+                                return val if pd.notna(val) else default_val
+                    return default_val
+                
+                imported_count = 0
                 for index, row in df_excel.iterrows():
-                    t_name = str(row.iloc[0]) if pd.notna(row.iloc[0]) else ""
-                    if t_name.strip() != "":
-                        t_cin = str(row.iloc[1]) if len(row) > 1 and pd.notna(row.iloc[1]) else ""
-                        t_address = str(row.iloc[2]) if len(row) > 2 and pd.notna(row.iloc[2]) else ""
-                        t_category = str(row.iloc[3]) if len(row) > 3 and pd.notna(row.iloc[3]) else "محلات صنف 1"
-                        t_contract = str(row.iloc[4]) if len(row) > 4 and pd.notna(row.iloc[4]) else ""
-                        raw_date = row.iloc[5] if len(row) > 5 and pd.notna(row.iloc[5]) else datetime.today().date()
-                        t_date = raw_date.strftime("%Y-%m-%d") if isinstance(raw_date, datetime) else str(datetime.today().date())
-                        t_rent = float(row.iloc[6]) if len(row) > 6 and pd.notna(row.iloc[6]) else 0.0
-                        t_phone = str(row.iloc[7]) if len(row) > 7 and pd.notna(row.iloc[7]) else ""
+                    t_name = str(get_val(row, ["الاسم", "اسم"]))
+                    if t_name.strip() != "" and t_name.strip() != "nan":
+                        
+                        raw_date = get_val(row, ["تاريخ", "بداية"], datetime.today().date())
+                        try:
+                            t_date = pd.to_datetime(raw_date).strftime("%Y-%m-%d")
+                        except:
+                            t_date = str(datetime.today().date())
+                            
+                        try:
+                            t_rent = float(get_val(row, ["ثمن", "كراء"], 0.0))
+                        except:
+                            t_rent = 0.0
+                            
+                        t_cin = str(get_val(row, ["بطاقة", "وطنية", "CIN"]))
+                        t_address = str(get_val(row, ["عنوان", "محل"]))
+                        t_contract = str(get_val(row, ["محضر", "عقد"]))
+                        
+                        raw_cat_excel = str(get_val(row, ["صنف", "نوع", "فئة", "نشاط"])).strip()
+                        if raw_cat_excel != "" and raw_cat_excel != "nan":
+                            t_category = raw_cat_excel
+                        else:
+                            t_category = excel_default_category
+                            
+                        t_phone = ""
+                        
+                        if t_cin == "nan": t_cin = ""
+                        if t_address == "nan": t_address = ""
+                        if t_contract == "nan": t_contract = ""
                         
                         c.execute("""INSERT INTO tenants (name, cin, address, shop_category, contract_id, start_date, rent_price, phone) 
                                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
                                   (t_name, t_cin, t_address, t_category, t_contract, t_date, t_rent, t_phone))
-                st.success(f"تم استيراد {len(df_excel)} مكتري بنجاح!")
+                        imported_count += 1
+                        
+                st.success(f"تم بنجاح استيراد {imported_count} مكتري، وتم تصنيفهم في صنف: {excel_default_category}!")
 
 # الواجهة 2: تسجيل الأداءات
 with tab2:
@@ -425,14 +465,14 @@ with tab7:
         
     if not tenants_edit_df.empty:
         edit_dict = dict(zip(tenants_edit_df.name, tenants_edit_df.id))
-        selected_edit_tenant = st.selectbox("اختر المكتري للتعديل:", options=list(edit_dict.keys()))
+        
+        st.markdown("### 👤 التعديل أو الحذف الفردي")
+        selected_edit_tenant = st.selectbox("اختر المكتري للتعديل أو الحذف الفردي:", options=list(edit_dict.keys()))
         t_edit_id = int(edit_dict[selected_edit_tenant])
         
-        st.markdown("---")
         colA, colB = st.columns(2)
         
         with colA:
-            st.markdown("#### 📝 تعديل بيانات، ثمن الكراء، وتاريخ البداية")
             c.execute("SELECT phone, shop_category, rent_price, start_date FROM tenants WHERE id = %s", (t_edit_id,))
             res_tenant = c.fetchone()
             current_phone = res_tenant[0] if res_tenant else ""
@@ -465,73 +505,4 @@ with tab7:
                     )
                     if new_id_card:
                         id_bytes, id_name = get_file_data(new_id_card)
-                        c.execute("UPDATE tenants SET id_card_file = %s, id_card_filename = %s WHERE id = %s", (id_bytes, id_name, t_edit_id))
-                    if new_contract:
-                        cont_bytes, cont_name = get_file_data(new_contract)
-                        c.execute("UPDATE tenants SET contract_file = %s, contract_filename = %s WHERE id = %s", (cont_bytes, cont_name, t_edit_id))
-                    if new_cond:
-                        cond_bytes, cond_name = get_file_data(new_cond)
-                        c.execute("UPDATE tenants SET conditions_file = %s, conditions_filename = %s WHERE id = %s", (cond_bytes, cond_name, t_edit_id))
-                    st.success("تم تحديث بيانات المكتري بنجاح!")
-                    st.rerun()
-
-        with colB:
-            st.markdown("#### ❌ حذف المكتري نهائياً")
-            confirm_delete = st.text_input("للتأكيد، اكتب كلمة 'حذف' في الخانة أدناه:")
-            if st.button("🚨 حذف المكتري"):
-                if confirm_delete == "حذف":
-                    c.execute("DELETE FROM payments WHERE tenant_id = %s", (t_edit_id,))
-                    c.execute("DELETE FROM tenants WHERE id = %s", (t_edit_id,))
-                    st.success("تم حذف المكتري بنجاح!")
-                    st.rerun()
-                else:
-                    st.warning("يجب كتابة كلمة 'حذف' لتأكيد العملية.")
-    else:
-        st.info("لا توجد مكترون ضمن هذا الصنف المحدد.")
-
-# الواجهة 8: النسخ الاحتياطي وتصدير البيانات
-with tab8:
-    st.subheader("💾 النسخ الاحتياطي وحفظ البيانات في الحاسوب")
-    st.write("يمكنك في أي وقت تحميل نسخ شاملة بصيغة Excel لجميع بيانات المكترين والعمليات المالية للاحتفاظ بها في حاسوبك.")
-    
-    col_b1, col_b2 = st.columns(2)
-    
-    with col_b1:
-        st.markdown("#### 👥 نسخة احتياطية لجميع المكترين")
-        df_all_tenants = pd.read_sql_query("""
-            SELECT name AS "الاسم الكامل", 
-                   cin AS "رقم البطاقة الوطنية", 
-                   address AS "عنوان المحل", 
-                   shop_category AS "صنف المحل", 
-                   contract_id AS "رقم العقد", 
-                   start_date AS "تاريخ البداية", 
-                   rent_price AS "ثمن الكراء", 
-                   phone AS "رقم الهاتف" 
-            FROM tenants
-        """, conn)
-        if not df_all_tenants.empty:
-            output_t = io.BytesIO()
-            with pd.ExcelWriter(output_t, engine='xlsxwriter') as writer:
-                df_all_tenants.to_excel(writer, index=False, sheet_name='المكترون')
-            st.download_button(label="📥 تحميل ملف المكترين (Excel)", data=output_t.getvalue(), file_name=f"نسخة_المكترين_{datetime.today().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.info("لا توجد بيانات مكترين حالياً.")
-            
-    with col_b2:
-        st.markdown("#### 💰 نسخة احتياطية لكافة الأداءات المالية")
-        df_all_payments = pd.read_sql_query("""
-            SELECT tenant_name AS "اسم المكتري", 
-                   months_paid AS "عدد الأشهر", 
-                   paid_months_names AS "الأشهر المؤداة", 
-                   amount AS "المبلغ المدفوع", 
-                   payment_date AS "تاريخ الأداء", 
-                   employee AS "الموظف" 
-            FROM payments
-        """, conn)
-        if not df_all_payments.empty:
-            output_p = io.BytesIO()
-            with pd.ExcelWriter(output_p, engine='xlsxwriter') as writer:
-                df_all_payments.to_excel(writer, index=False, sheet_name='الأداءات')
-            st.download_button(label="📥 تحميل ملف الأداءات (Excel)", data=output_p.getvalue(), file_name=f"نسخة_الأداءات_{datetime.today().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.info("لا توجد عمليات أداء مسجلة حتى الآن.")
+                        c.execute("UPDATE tenants SET id_card_file = %s, id_card_filename
