@@ -6,15 +6,20 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 io = __import__('io')
 
-# 1. إعداد الاتصال بقاعدة البيانات السحابية (Pooling)
+# 1. إعداد الاتصال بقاعدة البيانات السحابية مع معالجة الأخطاء الذكية
 @st.cache_resource
 def init_connection():
-    password = urllib.parse.quote_plus("4m-sA.XRZZu!8BW")
-    db_url = f"postgresql://postgres.cncdkxgkybutccqthvxq:KB9SX9JCU9rnWEHd@aws-1-eu-west-3.pooler.supabase.com:6543/postgres"
-    return psycopg2.connect(db_url)
+    try:
+        password = urllib.parse.quote_plus("4m-sA.XRZZu!8BW")
+        db_url = f"postgresql://postgres.cncdkxgkybutccqthvxq:KB9SX9JCU9rnWEHd@aws-1-eu-west-3.pooler.supabase.com:6543/postgres"
+        conn = psycopg2.connect(db_url)
+        conn.autocommit = True
+        return conn
+    except Exception as e:
+        st.error("⚠️ تعذر الاتصال بقاعدة البيانات السحابية. يرجى التأكد من تفعيل المشروع في Supabase.")
+        st.stop()
 
 conn = init_connection()
-conn.autocommit = True
 
 def get_file_data(uploaded_file):
     if uploaded_file is not None:
@@ -57,13 +62,17 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
 
 def get_due_status(start_date_str, tenant_id):
     local_cur = conn.cursor()
-    start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+    # تحويل الأنواع لتفادي أخطاء numpy/pandas
+    clean_tenant_id = int(tenant_id)
+    clean_start_date_str = str(start_date_str)
+    
+    start_date = datetime.strptime(clean_start_date_str, "%Y-%m-%d").date()
     today = datetime.today().date()
     total_months_since_start = (today.year - start_date.year) * 12 + today.month - start_date.month
     if today.day >= start_date.day:
         total_months_since_start += 1 
     
-    local_cur.execute("SELECT SUM(months_paid) FROM payments WHERE tenant_id = %s", (tenant_id,))
+    local_cur.execute("SELECT SUM(months_paid) FROM payments WHERE tenant_id = %s", (clean_tenant_id,))
     result = local_cur.fetchone()[0]
     local_cur.close()
     
@@ -160,10 +169,10 @@ with tab2:
     if not tenants_df.empty:
         tenant_dict = dict(zip(tenants_df.name, tenants_df.id))
         selected_tenant = st.selectbox("اختر المكتري", options=list(tenant_dict.keys()))
-        t_id = tenant_dict[selected_tenant]
+        t_id = int(tenant_dict[selected_tenant])
         
-        current_tenant_rent = tenants_df.loc[tenants_df['name'] == selected_tenant, 'rent_price'].values[0]
-        start_date_str = tenants_df.loc[tenants_df['name'] == selected_tenant, 'start_date'].values[0]
+        current_tenant_rent = float(tenants_df.loc[tenants_df['name'] == selected_tenant, 'rent_price'].values[0])
+        start_date_str = str(tenants_df.loc[tenants_df['name'] == selected_tenant, 'start_date'].values[0])
         
         unpaid_count, unpaid_names, next_months_names, paid_months = get_due_status(start_date_str, t_id)
         
@@ -240,7 +249,9 @@ with tab4:
         
     defaulters = []
     for index, row in tenants_df.iterrows():
-        unpaid_count, unpaid_names, _, _ = get_due_status(row['start_date'], row['id'])
+        t_id = int(row['id'])
+        start_date_str = str(row['start_date'])
+        unpaid_count, unpaid_names, _, _ = get_due_status(start_date_str, t_id)
         if unpaid_count > 0:
             defaulters.append({
                 "الاسم": row['name'], "البطاقة": row['cin'], "الصنف": row.get('shop_category', ''),
@@ -316,13 +327,13 @@ with tab5:
         df_search = pd.read_sql_query("SELECT * FROM tenants WHERE name ILIKE %s", conn, params=(safe_q,))
         if not df_search.empty:
             t_data = df_search.iloc[0]
-            t_id = t_data['id']
+            t_id = int(t_data['id'])
             
             st.markdown(f"### 👤 بيانات المكتري: {t_data['name']}")
             st.write(f"**البطاقة الوطنية:** {t_data['cin']} | **صنف المحل:** {t_data.get('shop_category', 'غير متوفر')} | **الهاتف:** {t_data.get('phone', 'غير متوفر')}")
             st.write(f"**العنوان:** {t_data['address']} | **ثمن الكراء:** {t_data['rent_price']} درهم | **تاريخ البداية:** {t_data['start_date']}")
             
-            unpaid_count, unpaid_names, _, paid_months = get_due_status(t_data['start_date'], t_id)
+            unpaid_count, unpaid_names, _, paid_months = get_due_status(str(t_data['start_date']), t_id)
             st.info(f"📊 عدد الأشهر المؤداة سابقاً: {paid_months} شهر | ⚠️ الأشهر المتأخرة غير المؤداة ({unpaid_count} شهر): {', '.join(unpaid_names) if unpaid_names else 'لا توجد متأخرات'}")
             
             st.markdown("#### 📂 الملفات المرفقة:")
@@ -398,7 +409,7 @@ with tab6:
         payment_id_to_delete = c1.number_input("أدخل 'رقم العملية' المراد حذفها:", min_value=0, step=1, value=0)
         if c1.button("🗑️ حذف العملية نهائياً"):
             if payment_id_to_delete > 0:
-                c.execute("DELETE FROM payments WHERE id = %s", (payment_id_to_delete,))
+                c.execute("DELETE FROM payments WHERE id = %s", (int(payment_id_to_delete),))
                 st.success("تم الحذف بنجاح!")
                 st.rerun()
 
@@ -415,7 +426,7 @@ with tab7:
     if not tenants_edit_df.empty:
         edit_dict = dict(zip(tenants_edit_df.name, tenants_edit_df.id))
         selected_edit_tenant = st.selectbox("اختر المكتري للتعديل:", options=list(edit_dict.keys()))
-        t_edit_id = edit_dict[selected_edit_tenant]
+        t_edit_id = int(edit_dict[selected_edit_tenant])
         
         st.markdown("---")
         colA, colB = st.columns(2)
@@ -430,7 +441,7 @@ with tab7:
             current_start_date_str = res_tenant[3] if res_tenant and res_tenant[3] else datetime.today().strftime("%Y-%m-%d")
             
             try:
-                parsed_start_date = datetime.strptime(current_start_date_str, "%Y-%m-%d").date()
+                parsed_start_date = datetime.strptime(str(current_start_date_str), "%Y-%m-%d").date()
             except:
                 parsed_start_date = datetime.today().date()
             
