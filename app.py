@@ -10,7 +10,7 @@ io = __import__('io')
 @st.cache_resource
 def init_connection():
     password = urllib.parse.quote_plus("4m-sA.XRZZu!8BW")
-    db_url = f"postgresql://postgres.cncdkxgkybutccqthvxq:KB9SX9JCU9rnWEHd@aws-1-eu-west-3.pooler.supabase.com:6543/postgres"
+db_url = f"postgresql://postgres.cncdkxgkybutccqthvxq:KB9SX9JCU9rnWEHd@aws-1-eu-west-3.pooler.supabase.com:6543/postgres"
     return psycopg2.connect(db_url)
 
 conn = init_connection()
@@ -223,9 +223,9 @@ with tab3:
     else:
         st.warning("لا توجد أداءات في هذه الفترة.")
 
-# الواجهة 4: المتقاعسون
+# الواجهة 4: المتقاعسون والرسالة النموذجية الرسمية
 with tab4:
-    st.subheader("الإنذارات وإرسال الرسائل للمتقاعسين")
+    st.subheader("الإنذارات وإرسال الرسائل الرسمية للمتقاعسين")
     defaulter_filter_cat = st.selectbox("فلترة المتقاعسين حسب الصنف:", options=["الكل"] + category_options, key="def_cat_filter")
     
     if defaulter_filter_cat == "الكل":
@@ -248,44 +248,80 @@ with tab4:
         df_defaulters = pd.DataFrame(defaulters).drop_duplicates(subset=["الاسم"])
         st.dataframe(df_defaulters, width='stretch')
         
-        st.markdown("### 📤 إرسال الإنذار")
-        selected_defaulter = st.selectbox("اختر متقاعس لإرسال الإنذار", options=df_defaulters["الاسم"])
+        st.markdown("### 📄 المعاينة الرسمية لرسالة الإنذار")
+        selected_defaulter = st.selectbox("اختر المكتري لإنشاء رسالة الإنذار:", options=df_defaulters["الاسم"])
         if selected_defaulter:
             d_info = df_defaulters[df_defaulters["الاسم"] == selected_defaulter].iloc[0]
-            letter = f"""إلى السيد(ة): {d_info['الاسم']}
-الحامل لبطاقة التعريف الوطنية رقم: {d_info['البطاقة']}
+            
+            # صياغة الرسالة مطابقة تماماً للنموذج الرسمي المرفق
+            official_letter = f"""المملكة المغربية
+عمالة إقليم بنسليمان
+جماعة شراط
+مصلحة الشؤون المالية و الاقتصادية
+الموارد المالية
+
+شراط في: {datetime.today().strftime('%Y-%m-%d')}
+
+من رئيس المجلس الجماعي لشراط
+إلى السيد(ة): {d_info['الاسم']}
+رقم البطاقة الوطنية: {d_info['البطاقة']}
 العنوان (المحل): {d_info['العنوان']} ({d_info['الصنف']})
 
-الموضوع: إنذار بأداء واجبات الكراء المتأخرة.
+الموضوع: إنذار بأداء واجبات الكراء.
 
-تحية طيبة وبعد،
-ننهي إلى علمكم أنكم لم تقوموا بأداء واجبات الكراء لمدة {d_info['عدد أشهر التأخير']} شهر/أشهر، وهي: ({d_info['الأشهر المتأخرة']}).
-بمجموع كلي يبلغ: {d_info['المبلغ المتأخر']} درهم.
+سلام تام بوجود مولانا الإمام،
+وبعد، أخبركم أنكم لم تقوموا بأداء الكراء الشهري عن الأشهر التالية:
+({d_info['الأشهر المتأخرة']})
 
-المرجو تسوية وضعيتكم المالية في أقرب الآجال تفادياً لأي متابعة قانونية."""
-            st.text_area("رسالة الإنذار:", letter, height=200)
+لذا انتم مطالبون بتسوية وضعيتكم الجبائية تجاه الجماعة في أقرب وقت، و ذلك داخل أجل 15 يوما من تاريخ تسلمكم هذه الرسالة.
+و نذكركم أنه في حالة عدم تسديد هذا الرسم الذي أصبح ملزماً عليكم، فإن الجماعة ستتخذ جميع الإجراءات الإدارية و القانونية اللازمة لذلك، كما هو مبين في كناش التحملات و عقد الكراء.
+
+والسلام
+امضاء الرئيس:"""
+
+            st.text_area("نص الرسالة الرسمية:", official_letter, height=280)
             
-            if d_info['الهاتف']:
-                phone_str = str(d_info['الهاتف']).replace("+", "").replace(" ", "")
-                wa_link = f"https://wa.me/{phone_str}?text={urllib.parse.quote(letter)}"
-                st.markdown(f'<a href="{wa_link}" target="_blank" style="background-color:#25D366; color:white; padding:10px 20px; text-decoration:none; border-radius:5px; font-weight:bold;">📲 إرسال الإنذار عبر الواتساب</a>', unsafe_allow_html=True)
+            col_btn1, col_btn2 = st.columns(2)
+            
+            # زر التحميل كملف Word (Docx)
+            with col_btn1:
+                docx_output = io.BytesIO()
+                docx_output.write(official_letter.encode('utf-8'))
+                st.download_button(
+                    label="📥 تحميل الرسالة كملف جاهز (Word/Text)",
+                    data=docx_output.getvalue(),
+                    file_name=f"إنذار_{d_info['الاسم']}.doc",
+                    mime="application/msword"
+                )
+            
+            # زر الإرسال عبر الواتساب
+            with col_btn2:
+                if d_info['الهاتف']:
+                    phone_str = str(d_info['الهاتف']).replace("+", "").replace(" ", "")
+                    wa_link = f"https://wa.me/{phone_str}?text={urllib.parse.quote(official_letter)}"
+                    st.markdown(f'<a href="{wa_link}" target="_blank" style="background-color:#25D366; color:white; padding:10px 20px; text-decoration:none; border-radius:5px; font-weight:bold; display:inline-block; text-align:center; width:100%;">📲 إرسال الإنذار عبر الواتساب</a>', unsafe_allow_html=True)
+                else:
+                    st.warning("رقم الهاتف غير متوفر لهذا المكتري لإرساله عبر الواتساب.")
     else:
         st.success("لا يوجد أي متقاعسين حالياً في هذا الصنف.")
 
-# الواجهة 5: البحث وعرض المرفقات
+# الواجهة 5: البحث وعرض المرفقات والأشهر غير المؤداة
 with tab5:
-    st.subheader("البحث عن مكتري وعرض المرفقات")
-    search_q = st.text_input("أدخل اسم المكتري:")
+    st.subheader("البحث عن مكتري وعرض المرفقات وحالة الأشهر")
+    search_q = st.text_input("أدخل اسم المكتري (يقبل الحروف الكبيرة والصغيرة):")
     if search_q:
         safe_q = f"%{search_q}%"
-        df_search = pd.read_sql_query(f"SELECT * FROM tenants WHERE name LIKE '{safe_q}'", conn)
+        df_search = pd.read_sql_query("SELECT * FROM tenants WHERE name ILIKE %s", conn, params=(safe_q,))
         if not df_search.empty:
             t_data = df_search.iloc[0]
             t_id = t_data['id']
             
             st.markdown(f"### 👤 بيانات المكتري: {t_data['name']}")
             st.write(f"**البطاقة الوطنية:** {t_data['cin']} | **صنف المحل:** {t_data.get('shop_category', 'غير متوفر')} | **الهاتف:** {t_data.get('phone', 'غير متوفر')}")
-            st.write(f"**العنوان:** {t_data['address']} | **ثمن الكراء:** {t_data['rent_price']} درهم")
+            st.write(f"**العنوان:** {t_data['address']} | **ثمن الكراء:** {t_data['rent_price']} درهم | **تاريخ البداية:** {t_data['start_date']}")
+            
+            unpaid_count, unpaid_names, _, paid_months = get_due_status(t_data['start_date'], t_id)
+            st.info(f"📊 عدد الأشهر المؤداة سابقاً: {paid_months} شهر | ⚠️ الأشهر المتأخرة غير المؤداة ({unpaid_count} شهر): {', '.join(unpaid_names) if unpaid_names else 'لا توجد متأخرات'}")
             
             st.markdown("#### 📂 الملفات المرفقة:")
             cols = st.columns(3)
@@ -319,7 +355,7 @@ with tab5:
             
             st.markdown("---")
             st.markdown("### 📜 سجل الأداءات (المدفوعة)")
-            df_payments = pd.read_sql_query(f"SELECT * FROM payments WHERE tenant_id = {t_id}", conn)
+            df_payments = pd.read_sql_query("SELECT * FROM payments WHERE tenant_id = %s", conn, params=(t_id,))
             if not df_payments.empty:
                 for index, p_row in df_payments.iterrows():
                     with st.expander(f"أداء بتاريخ: {p_row['payment_date']} | المبلغ: {p_row['amount']} درهم"):
@@ -366,7 +402,7 @@ with tab6:
 
 # الواجهة 7: إدارة المكترين
 with tab7:
-    st.subheader("إدارة المكترين (تعديل وحذف المكترين)")
+    st.subheader("إدارة المكترين (تعديل البيانات، الثمن، التاريخ، أو الحذف)")
     manage_filter_cat = st.selectbox("فلترة قائمة الإدارة حسب الصنف:", options=["الكل"] + category_options, key="manage_cat_filter")
     
     if manage_filter_cat == "الكل":
@@ -376,24 +412,33 @@ with tab7:
         
     if not tenants_edit_df.empty:
         edit_dict = dict(zip(tenants_edit_df.name, tenants_edit_df.id))
-        selected_edit_tenant = st.selectbox("اختر المكتري:", options=list(edit_dict.keys()))
+        selected_edit_tenant = st.selectbox("اختر المكتري للتعديل:", options=list(edit_dict.keys()))
         t_edit_id = edit_dict[selected_edit_tenant]
         
         st.markdown("---")
         colA, colB = st.columns(2)
         
         with colA:
-            st.markdown("#### 📝 تعديل بيانات ومرفقات المكتري")
-            c.execute("SELECT phone, shop_category FROM tenants WHERE id = %s", (t_edit_id,))
+            st.markdown("#### 📝 تعديل بيانات، ثمن الكراء، وتاريخ البداية")
+            c.execute("SELECT phone, shop_category, rent_price, start_date FROM tenants WHERE id = %s", (t_edit_id,))
             res_tenant = c.fetchone()
             current_phone = res_tenant[0] if res_tenant else ""
             current_category = res_tenant[1] if res_tenant and res_tenant[1] else "محلات صنف 1"
+            current_rent = float(res_tenant[2]) if res_tenant and res_tenant[2] is not None else 0.0
+            current_start_date_str = res_tenant[3] if res_tenant and res_tenant[3] else datetime.today().strftime("%Y-%m-%d")
+            
+            try:
+                parsed_start_date = datetime.strptime(current_start_date_str, "%Y-%m-%d").date()
+            except:
+                parsed_start_date = datetime.today().date()
             
             cat_index = category_options.index(current_category) if current_category in category_options else 3
             
             with st.form("edit_tenant_form"):
                 new_phone = st.text_input("تحديث رقم الهاتف:", value=current_phone if current_phone else "")
                 new_category = st.selectbox("تحديث صنف المحل:", options=category_options, index=cat_index)
+                new_rent = st.number_input("تحديث ثمن الكراء الشهري (درهم):", value=current_rent, min_value=0.0, step=100.0)
+                new_start_date = st.date_input("تحديث تاريخ بداية الكراء:", value=parsed_start_date)
                 
                 st.markdown("**إضافة أو تحديث المرفقات:**")
                 new_id_card = st.file_uploader("رفع/تحديث نسخة البطاقة", type=["pdf", "png", "jpg", "jpeg"], key="edit_id")
@@ -401,7 +446,8 @@ with tab7:
                 new_cond = st.file_uploader("رفع/تحديث كناش التحملات", type=["pdf", "png", "jpg", "jpeg"], key="edit_cond")
                 
                 if st.form_submit_button("حفظ التعديلات"):
-                    c.execute("UPDATE tenants SET phone = %s, shop_category = %s WHERE id = %s", (new_phone, new_category, t_edit_id))
+                    c.execute("""UPDATE tenants SET phone = %s, shop_category = %s, rent_price = %s, start_date = %s WHERE id = %s""",
+                              (new_phone, new_category, new_rent, str(new_start_date), t_edit_id))
                     if new_id_card:
                         id_bytes, id_name = get_file_data(new_id_card)
                         c.execute("UPDATE tenants SET id_card_file = %s, id_card_filename = %s WHERE id = %s", (id_bytes, id_name, t_edit_id))
@@ -411,7 +457,7 @@ with tab7:
                     if new_cond:
                         cond_bytes, cond_name = get_file_data(new_cond)
                         c.execute("UPDATE tenants SET conditions_file = %s, conditions_filename = %s WHERE id = %s", (cond_bytes, cond_name, t_edit_id))
-                    st.success("تم التحديث بنجاح!")
+                    st.success("تم تحديث بيانات المكتري بنجاح!")
                     st.rerun()
 
         with colB:
@@ -428,7 +474,7 @@ with tab7:
     else:
         st.info("لا توجد مكترون ضمن هذا الصنف المحدد.")
 
-# الواجهة 8: النسخ الاحتياطي وتصدير البيانات (تم تصحيح علامات التنصيص هنا)
+# الواجهة 8: النسخ الاحتياطي وتصدير البيانات
 with tab8:
     st.subheader("💾 النسخ الاحتياطي وحفظ البيانات في الحاسوب")
     st.write("يمكنك في أي وقت تحميل نسخ شاملة بصيغة Excel لجميع بيانات المكترين والعمليات المالية للاحتفاظ بها في حاسوبك.")
