@@ -142,10 +142,9 @@ with tab1:
                                   (t_name, t_cin, t_address, t_category, t_contract, t_date, t_rent, t_phone))
                 st.success(f"تم استيراد {len(df_excel)} مكتري بنجاح!")
 
-# الواجهة 2: تسجيل الأداءات (مع فلتر الصنف لتسهيل الاختيار)
+# الواجهة 2: تسجيل الأداءات
 with tab2:
     st.subheader("تسجيل أداء جديد مع وصل الدفع")
-    
     selected_filter_cat = st.selectbox("فلترة المكترين حسب الصنف لاختيار أسرع:", options=["الكل"] + category_options, key="pay_cat_filter")
     
     if selected_filter_cat == "الكل":
@@ -224,10 +223,9 @@ with tab3:
     else:
         st.warning("لا توجد أداءات في هذه الفترة.")
 
-# الواجهة 4: المتقاعسون (مع فلتر الصنف)
+# الواجهة 4: المتقاعسون
 with tab4:
     st.subheader("الإنذارات وإرسال الرسائل للمتقاعسين")
-    
     defaulter_filter_cat = st.selectbox("فلترة المتقاعسين حسب الصنف:", options=["الكل"] + category_options, key="def_cat_filter")
     
     if defaulter_filter_cat == "الكل":
@@ -430,7 +428,7 @@ with tab7:
     else:
         st.info("لا توجد مكترون ضمن هذا الصنف المحدد.")
 
-# الواجهة 8: النسخ الاحتياطي وتصدير البيانات
+# الواجهة 8: النسخ الاحتياطي وتصدير البيانات (تم تصحيح علامات التنصيص هنا)
 with tab8:
     st.subheader("💾 النسخ الاحتياطي وحفظ البيانات في الحاسوب")
     st.write("يمكنك في أي وقت تحميل نسخ شاملة بصيغة Excel لجميع بيانات المكترين والعمليات المالية للاحتفاظ بها في حاسوبك.")
@@ -439,18 +437,36 @@ with tab8:
     
     with col_b1:
         st.markdown("#### 👥 نسخة احتياطية لجميع المكترين")
-        df_all_tenants = pd.read_sql_query("SELECT name AS 'الاسم الكامل', cin AS 'رقم البطاقة الوطنية', address AS 'عنوان المحل', shop_category AS 'صنف المحل', contract_id AS 'رقم العقد', start_date AS 'تاريخ البداية', rent_price AS 'ثمن الكراء', phone AS 'رقم الهاتف' FROM tenants", conn)
+        df_all_tenants = pd.read_sql_query("""
+            SELECT name AS "الاسم الكامل", 
+                   cin AS "رقم البطاقة الوطنية", 
+                   address AS "عنوان المحل", 
+                   shop_category AS "صنف المحل", 
+                   contract_id AS "رقم العقد", 
+                   start_date AS "تاريخ البداية", 
+                   rent_price AS "ثمن الكراء", 
+                   phone AS "رقم الهاتف" 
+            FROM tenants
+        """, conn)
         if not df_all_tenants.empty:
             output_t = io.BytesIO()
             with pd.ExcelWriter(output_t, engine='xlsxwriter') as writer:
                 df_all_tenants.to_excel(writer, index=False, sheet_name='المكترون')
             st.download_button(label="📥 تحميل ملف المكترين (Excel)", data=output_t.getvalue(), file_name=f"نسخة_المكترين_{datetime.today().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         else:
-            st.info("لا توجد بياناتكترين حالياً.")
+            st.info("لا توجد بيانات مكترين حالياً.")
             
     with col_b2:
         st.markdown("#### 💰 نسخة احتياطية لكافة الأداءات المالية")
-        df_all_payments = pd.read_sql_query("SELECT tenant_name AS 'اسم المكتري', months_paid AS 'عدد الأشهر', paid_months_names AS 'الأشهر المؤداة', amount AS 'المبلغ المدفوع', payment_date AS 'تاريخ الأداء', employee AS 'الموظف' FROM payments", conn)
+        df_all_payments = pd.read_sql_query("""
+            SELECT tenant_name AS "اسم المكتري", 
+                   months_paid AS "عدد الأشهر", 
+                   paid_months_names AS "الأشهر المؤداة", 
+                   amount AS "المبلغ المدفوع", 
+                   payment_date AS "تاريخ الأداء", 
+                   employee AS "الموظف" 
+            FROM payments
+        """, conn)
         if not df_all_payments.empty:
             output_p = io.BytesIO()
             with pd.ExcelWriter(output_p, engine='xlsxwriter') as writer:
