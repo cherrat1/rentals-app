@@ -170,8 +170,12 @@ with tab1:
                         except:
                             t_date = str(datetime.today().date())
                             
+                        # استخراج وتحسين قراءة ثمن الكراء مهما كانت صياغته
+                        raw_rent = get_val(row, ["ثمن", "كراء", "المبلغ"], 0.0)
                         try:
-                            t_rent = float(get_val(row, ["ثمن", "كراء"], 0.0))
+                            # تنظيف أي حروف أو مسافات غير numérica
+                            clean_rent_str = "".join(ch for ch in str(raw_rent) if ch.isdigit() or ch == '.')
+                            t_rent = float(clean_rent_str) if clean_rent_str else 0.0
                         except:
                             t_rent = 0.0
                             
@@ -198,7 +202,7 @@ with tab1:
                         )
                         imported_count += 1
                         
-                st.success(f"تم بنجاح استيراد {imported_count} مكتري، وتم تصنيفهم في صنف: {excel_default_category}!")
+                st.success(f"تم بنجاح استيراد {imported_count} مكتري، وتثبيت ثمن الكراء وتواريخ البداية!")
 
 # الواجهة 2: تسجيل الأداءات
 with tab2:
