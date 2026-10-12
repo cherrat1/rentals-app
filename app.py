@@ -29,7 +29,7 @@ def get_file_data(uploaded_file):
 # إنشاء مؤشر عام لتنفيذ الأوامر البسيطة
 c = conn.cursor()
 
-# 2. إنشاء الجداول السحابية والتأكد من وجود الأعمدة
+# 2. إنشاء الجداول السحابية والتأكد من وجود أعمدة الأرشيف والمراسلات للمتقاعسين
 c.execute("""CREATE TABLE IF NOT EXISTS tenants (
     id SERIAL PRIMARY KEY, 
     name TEXT, cin TEXT, address TEXT, 
@@ -37,8 +37,18 @@ c.execute("""CREATE TABLE IF NOT EXISTS tenants (
     shop_category TEXT,
     id_card_file BYTEA, id_card_filename TEXT,
     contract_file BYTEA, contract_filename TEXT,
-    conditions_file BYTEA, conditions_filename TEXT
+    conditions_file BYTEA, conditions_filename TEXT,
+    notice_1_file BYTEA, notice_1_filename TEXT,
+    notice_2_file BYTEA, notice_2_filename TEXT,
+    cancellation_file BYTEA, cancellation_filename TEXT
 )""")
+
+# التأكد من وجود أعمدة الرسائل والطلب في حال كان الجدول قديماً
+for col_name in ["notice_1_file BYTEA", "notice_1_filename TEXT", "notice_2_file BYTEA", "notice_2_filename TEXT", "cancellation_file BYTEA", "cancellation_filename TEXT"]:
+    try:
+        c.execute(f"ALTER TABLE tenants ADD COLUMN IF NOT EXISTS {col_name};")
+    except:
+        pass
 
 try:
     c.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS shop_category TEXT;")
@@ -118,7 +128,7 @@ with tab1:
             start_date = st.date_input("تاريخ بداية الكراء")
             rent_price = st.number_input("ثمن الكراء الشهري (درهم) *", min_value=0.0, step=100.0)
             
-            st.markdown("**(اختياري) رفع المستندات:**")
+            st.markdown("**(اختياري) رفع المستندات الأساسية:**")
             id_card_file = st.file_uploader("نسخة البطاقة الوطنية", type=["pdf", "png", "jpg", "jpeg"], key="add_id_file")
             contract_file = st.file_uploader("نسخة عقد الكراء", type=["pdf", "png", "jpg", "jpeg"], key="add_contract_file")
             conditions_file = st.file_uploader("كناش التحملات", type=["pdf", "png", "jpg", "jpeg"], key="add_cond_file")
@@ -304,9 +314,9 @@ with tab3:
     else:
         st.warning("لا توجد أداءات في هذه الفترة.")
 
-# الواجهة 4: المتقاعسون والرسائل الرسمية (الأولى، الثانية، وطلب الإلغاء)
+# الواجهة 4: المتقاعسون والرسائل الرسمية (مع إمكانية رفع نسخ الرسائل المرسلة وطلب الإلغاء)
 with tab4:
-    st.subheader("الإنذارات وإرسال الرسائل الرسمية للمتقاعسين")
+    st.subheader("الإنذارات ومتابعة المراسلات وطلبات الإلغاء")
     defaulter_filter_cat = st.selectbox("فلترة المتقاعسين حسب الصنف:", options=["الكل"] + category_options, key="def_cat_filter")
     
     if defaulter_filter_cat == "الكل":
@@ -321,6 +331,7 @@ with tab4:
         unpaid_count, unpaid_names, _, _ = get_due_status(start_date_str, t_id)
         if unpaid_count > 0:
             defaulters.append({
+                "id": t_id,
                 "الاسم": row['name'], "البطاقة": row['cin'], "الصنف": row.get('shop_category', ''),
                 "الهاتف": row.get('phone', ''), "العنوان": row['address'], "ثمن الكراء": row['rent_price'],
                 "عدد أشهر التأخير": unpaid_count, "المبلغ المتأخر": unpaid_count * row['rent_price'],
@@ -329,14 +340,21 @@ with tab4:
             
     if defaulters:
         df_defaulters = pd.DataFrame(defaulters).drop_duplicates(subset=["الاسم"])
-        st.dataframe(df_defaulters, width='stretch')
+        st.dataframe(df_defaulters.drop(columns=["id"]), width='stretch')
         
-        st.markdown("### 📄 المعاينة الرسمية للرسائل والطلبات")
-        selected_defaulter = st.selectbox("اختر المكتري لإنشاء المراسلات:", options=df_defaulters["الاسم"])
+        st.markdown("### 📄 المعاينة، التحميل، ورفع وثائق المراسلات")
+        selected_defaulter = st.selectbox("اختر المكتري لإدارة مراسلاته وملفاته:", options=df_defaulters["الاسم"])
         if selected_defaulter:
-            d_info = df_defaulters[df_defaulters["الاسم"] == selected_defaulter].iloc[0]
+            row_match = df_defaulters[df_defaulters["الاسم"] == selected_defaulter].iloc[0]
+            d_id = int(row_match["id"])
             
-            # نص الرسالة الأولى (إنذار أول)
+            # جلب الملفات المرفوعة مسبقاً لهذا المكتري إن وجدت
+            c.execute("SELECT notice_1_filename, notice_2_filename, cancellation_filename FROM tenants WHERE id = %s", (d_id,))
+            files_db = c.fetchone()
+            n1_fn = files_db[0] if files_db else None
+            n2_fn = files_db[1] if files_db else None
+            canc_fn = files_db[2] if files_db else None
+
             letter_1 = f"""المملكة المغربية
 عمالة إقليم بنسليمان
 جماعة شراط
@@ -345,22 +363,21 @@ with tab4:
 شراط في: {datetime.today().strftime('%Y-%m-%d')}
 
 من رئيس المجلس الجماعي لشراط
-إلى السيد(ة): {d_info['الاسم']}
-رقم البطاقة الوطنية: {d_info['البطاقة']}
-العنوان (المحل): {d_info['العنوان']} ({d_info['الصنف']})
+إلى السيد(ة): {row_match['الاسم']}
+رقم البطاقة الوطنية: {row_match['البطاقة']}
+العنوان (المحل): {row_match['العنوان']} ({row_match['الصنف']})
 
 الموضوع: إنذار أول بأداء واجبات الكراء.
 
 سلام تام بوجود مولانا الإمام،
 وبعد، أخبركم أنكم لم تقوموا بأداء الكراء الشهري عن الأشهر التالية:
-({d_info['الأشهر المتأخرة']})
+({row_match['الأشهر المتأخرة']})
 
 لذا أنتم مطالبون بتسوية وضعيتكم الجبائية تجاه الجماعة في أقرب وقت، وذلك داخل أجل 15 يوما من تاريخ تسلمكم هذه الرسالة.
 
 والسلام
 امضاء الرئيس:"""
 
-            # نص الرسالة الثانية (إنذار نهائي)
             letter_2 = f"""المملكة المغربية
 عمالة إقليم بنسليمان
 جماعة شراط
@@ -369,61 +386,90 @@ with tab4:
 شراط في: {datetime.today().strftime('%Y-%m-%d')}
 
 من رئيس المجلس الجماعي لشراط
-إلى السيد(ة): {d_info['الاسم']}
-رقم البطاقة الوطنية: {d_info['البطاقة']}
-العنوان (المحل): {d_info['العنوان']} ({d_info['الصنف']})
+إلى السيد(ة): {row_match['الاسم']}
+رقم البطاقة الوطنية: {row_match['البطاقة']}
+العنوان (المحل): {row_match['العنوان']} ({row_match['الصنف']})
 
 الموضوع: إنذار ثاني ونهائي بأداء واجبات الكراء.
 
 سلام تام بوجود مولانا الإمام،
 وبعد، إلحاقاً بالإنذار الأول، ونظراً لتمرسكم في عدم تسديد واجبات الكراء عن الأشهر:
-({d_info['الأشهر المتأخرة']})
+({row_match['الأشهر المتأخرة']})
 
 نخبركم أن هذا إنذار نهائي داخل أجل 7 أيام، وفي حالة التخلف، ستضطر الجماعة لاتخاذ الإجراءات القانونية والإدارية لسحب المحل وفرض المساطر الجبائية المعمول بها.
 
 والسلام
 امضاء الرئيس:"""
 
-            # طلب إلغاء الاستفادة / العقد
             cancellation_request = f"""إلى السيد: رئيس المجلس الجماعي لشراط
 الموضوع: طلب إلغاء استغلال المحل التجاري / عقد الكراء.
 
 سلام تام بوجود مولانا الإمام،
 أنا الموقعة أسفله:
-الاسم الكامل: {d_info['الاسم']}
-رقم البطاقة الوطنية: {d_info['البطاقة']}
-رقم المحل / العنوان: {d_info['العنوان']} ({d_info['الصنف']})
+الاسم الكامل: {row_match['الاسم']}
+رقم البطاقة الوطنية: {row_match['البطاقة']}
+رقم المحل / العنوان: {row_match['العنوان']} ({row_match['الصنف']})
 
-أتقدم إلىسيادتكم بطلبي هذا قصد الموافقة على إلغاء استفادتي من المحل التجاري المذكور أعلاه وتسليم م مفاتيحه للجماعة، نظراً لظروفي الخاصة، مع إبراء ذمتي المالية.
+أتقدم إلى سيادتكم بطلبي هذا قصد الموافقة على إلغاء استفادتي من المحل التجاري المذكور أعلاه وتسليم مفاتيحه للجماعة، نظراً لظروفي الخاصة، مع إبراء ذمتي المالية.
 
 وتفضلوا بقبول فائق الاحترام والتقدير.
 
 الإمضاء:
 التاريخ: {datetime.today().strftime('%Y-%m-%d')}"""
 
-            tab_l1, tab_l2, tab_canc = st.tabs(["📩 الرسالة الأولى", "⚠️ الرسالة الثانية", "📝 طلب إلغاء (في حال الطلب)"])
+            tab_l1, tab_l2, tab_canc = st.tabs(["📩 الرسالة الأولى ومتابعتها", "⚠️ الرسالة الثانية ومتابعتها", "📝 طلب الإلغاء وأرشفته"])
             
             with tab_l1:
-                st.text_area("نص الرسالة الأولى:", letter_1, height=220, key="txt_l1")
+                st.text_area("نص الرسالة الأولى:", letter_1, height=180, key="txt_l1")
                 doc1 = io.BytesIO()
                 doc1.write(letter_1.encode('utf-8'))
-                st.download_button("📥 تحميل الرسالة الأولى (Word/Text)", data=doc1.getvalue(), file_name=f"الإنذار_الأول_{d_info['الاسم']}.doc", mime="application/msword")
+                st.download_button("📥 تحميل قالب الرسالة الأولى", data=doc1.getvalue(), file_name=f"الإنذار_الأول_{row_match['الاسم']}.doc", mime="application/msword")
+                
+                st.markdown("---")
+                st.markdown("**أرشيف الرسالة الأولى (بعد إرسالها):**")
+                if n1_fn:
+                    st.success(f"✅ تم رفع نسخة الرسالة الأولى مسبقاً: {n1_fn}")
+                up_n1 = st.file_uploader("ارفع نسخة الرسالة الأولى المرسلة (صورة أو PDF):", type=["pdf", "png", "jpg", "jpeg"], key="up_n1_file")
+                if up_n1:
+                    b_n1, name_n1 = get_file_data(up_n1)
+                    c.execute("UPDATE tenants SET notice_1_file = %s, notice_1_filename = %s WHERE id = %s", (b_n1, name_n1, d_id))
+                    st.success("تم رفع وحفظ نسخة الرسالة الأولى في أرشيف المكتري بنجاح!")
             
             with tab_l2:
-                st.text_area("نص الرسالة الثانية:", letter_2, height=220, key="txt_l2")
+                st.text_area("نص الرسالة الثانية:", letter_2, height=180, key="txt_l2")
                 doc2 = io.BytesIO()
                 doc2.write(letter_2.encode('utf-8'))
-                st.download_button("📥 تحميل الرسالة الثانية (Word/Text)", data=doc2.getvalue(), file_name=f"الإنذار_الثاني_{d_info['الاسم']}.doc", mime="application/msword")
+                st.download_button("📥 تحميل قالب الرسالة الثانية", data=doc2.getvalue(), file_name=f"الإنذار_الثاني_{row_match['الاسم']}.doc", mime="application/msword")
+                
+                st.markdown("---")
+                st.markdown("**أرشيف الرسالة الثانية (بعد إرسالها):**")
+                if n2_fn:
+                    st.success(f"✅ تم رفع نسخة الرسالة الثانية مسبقاً: {n2_fn}")
+                up_n2 = st.file_uploader("ارفع نسخة الرسالة الثانية المرسلة (صورة أو PDF):", type=["pdf", "png", "jpg", "jpeg"], key="up_n2_file")
+                if up_n2:
+                    b_n2, name_n2 = get_file_data(up_n2)
+                    c.execute("UPDATE tenants SET notice_2_file = %s, notice_2_filename = %s WHERE id = %s", (b_n2, name_n2, d_id))
+                    st.success("تم رفع وحفظ نسخة الرسالة الثانية في أرشيف المكتري بنجاح!")
                 
             with tab_canc:
-                st.text_area("نص طلب الإلغاء:", cancellation_request, height=220, key="txt_canc")
+                st.text_area("نص طلب الإلغاء:", cancellation_request, height=180, key="txt_canc")
                 doc_canc = io.BytesIO()
                 doc_canc.write(cancellation_request.encode('utf-8'))
-                st.download_button("📥 تحميل نموذج طلب الإلغاء (Word/Text)", data=doc_canc.getvalue(), file_name=f"طلب_إلغاء_{d_info['الاسم']}.doc", mime="application/msword")
+                st.download_button("📥 تحميل نموذج طلب الإلغاء", data=doc_canc.getvalue(), file_name=f"طلب_إلغاء_{row_match['الاسم']}.doc", mime="application/msword")
+                
+                st.markdown("---")
+                st.markdown("**أرشيف طلب الإلغاء المقدم من المكتري:**")
+                if canc_fn:
+                    st.success(f"✅ تم رفع طلب الإلغاء مسبقاً: {canc_fn}")
+                up_canc = st.file_uploader("ارفع صورة أو ملف طلب الإلغاء الذي وقعه المكتري:", type=["pdf", "png", "jpg", "jpeg"], key="up_canc_file")
+                if up_canc:
+                    b_canc, name_canc = get_file_data(up_canc)
+                    c.execute("UPDATE tenants SET cancellation_file = %s, cancellation_filename = %s WHERE id = %s", (b_canc, name_canc, d_id))
+                    st.success("تم رفع وحفظ طلب الإلغاء في أرشيف المكتري بنجاح!")
 
             st.markdown("---")
-            if d_info['الهاتف']:
-                phone_str = str(d_info['الهاتف']).replace("+", "").replace(" ", "")
+            if row_match['الهاتف']:
+                phone_str = str(row_match['الهاتف']).replace("+", "").replace(" ", "")
                 wa_link = f"https://wa.me/{phone_str}?text={urllib.parse.quote(letter_1)}"
                 st.markdown(f'<a href="{wa_link}" target="_blank" style="background-color:#25D366; color:white; padding:10px 20px; text-decoration:none; border-radius:5px; font-weight:bold; display:inline-block; text-align:center; width:100%;">📲 إرسال الإنذار الأول عبر الواتساب</a>', unsafe_allow_html=True)
     else:
@@ -447,7 +493,7 @@ with tab5:
             unpaid_count, unpaid_names, _, paid_months = get_due_status(str(t_data['start_date']), t_id)
             st.info(f"📊 عدد الأشهر المؤداة سابقاً: {paid_months} شهر | ⚠️ الأشهر المتأخرة غير المؤداة ({unpaid_count} شهر): {', '.join(unpaid_names) if unpaid_names else 'لا توجد متأخرات'}")
             
-            st.markdown("#### 📂 الملفات المرفقة:")
+            st.markdown("#### 📂 الملفات والمستندات المرفقة:")
             cols = st.columns(3)
             
             id_file_data = t_data.get('id_card_file')
@@ -476,6 +522,34 @@ with tab5:
                 cols[2].download_button("📥 تحميل الكناش", data=cond_file_data, file_name=cond_file_name, key=f"dl_cond_{t_id}")
             else:
                 cols[2].write("كناش التحملات: ❌ غير متوفر")
+                
+            # عرض أزرار تحميل المراسلات وطلب الإلغاء إن وجدت مرفوعة
+            st.markdown("**أرشيف الإنذارات وطلبات الإلغاء للمكتري:**")
+            col_m1, col_m2, col_m3 = st.columns(3)
+            
+            n1_d = t_data.get('notice_1_file')
+            n1_n = t_data.get('notice_1_filename')
+            if n1_d is not None and n1_n:
+                if isinstance(n1_d, memoryview): n1_d = bytes(n1_d)
+                col_m1.download_button("📥 تحميل نسخة الإنذار 1", data=n1_d, file_name=n1_n, key=f"dl_n1_{t_id}")
+            else:
+                col_m1.write("الإنذار 1 المرسل: ❌ غير مرفوع")
+                
+            n2_d = t_data.get('notice_2_file')
+            n2_n = t_data.get('notice_2_filename')
+            if n2_d is not None and n2_n:
+                if isinstance(n2_d, memoryview): n2_d = bytes(n2_d)
+                col_m2.download_button("📥 تحميل نسخة الإنذار 2", data=n2_d, file_name=n2_n, key=f"dl_n2_{t_id}")
+            else:
+                col_m2.write("الإنذار 2 المرسل: ❌ غير مرفوع")
+                
+            canc_d = t_data.get('cancellation_file')
+            canc_n = t_data.get('cancellation_filename')
+            if canc_d is not None and canc_n:
+                if isinstance(canc_d, memoryview): canc_d = bytes(canc_d)
+                col_m3.download_button("📥 تحميل طلب الإلغاء", data=canc_d, file_name=canc_n, key=f"dl_canc_{t_id}")
+            else:
+                col_m3.write("طلب الإلغاء: ❌ غير مرفوع")
             
             st.markdown("---")
             st.markdown("### 📜 سجل الأداءات (المدفوعة)")
@@ -524,7 +598,7 @@ with tab6:
                 st.success("تم الحذف بنجاح!")
                 st.rerun()
 
-# الواجهة 7: إدارة المكترين (مع إمكانية تعديل العنوان)
+# الواجهة 7: إدارة المكترين
 with tab7:
     st.subheader("إدارة المكترين (تعديل البيانات، العنوان، الثمن، التاريخ، أو الحذف)")
     manage_filter_cat = st.selectbox("فلترة قائمة الإدارة حسب الصنف:", options=["الكل"] + category_options, key="manage_cat_filter")
