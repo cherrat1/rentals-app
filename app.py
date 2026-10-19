@@ -231,7 +231,7 @@ if t3 is not None:
             st.dataframe(df, width='stretch')
             st.success(f"الإجمالي: {df['المبلغ'].sum()} درهم")
 
-# --- الواجهة 4: المتقاعسون (مع استعادة جميع الميزات) ---
+# --- الواجهة 4: المتقاعسون (مع التوليد الذكي للإنذارات وإصلاح الواتساب) ---
 if t4 is not None:
     with t4:
         st.subheader("الإنذارات ومتابعة المراسلات وطلبات الإلغاء")
@@ -264,7 +264,7 @@ if t4 is not None:
             # قسم الميزات الذي يظهر فقط للمشرفين
             if role in ["SuperAdmin", "LocalAdmin"]:
                 st.markdown("---")
-                st.subheader("إجراءات المتقاعسين (واتساب / إنذارات / إفراغ)")
+                st.subheader("إجراءات المتقاعسين (واتساب / توليد الإنذارات / الإفراغ)")
                 
                 defaulter_names = [d['name'] for d in raw_defaulters]
                 selected_def_name = st.selectbox("اختر المكتري لاتخاذ الإجراء:", options=defaulter_names)
@@ -275,28 +275,47 @@ if t4 is not None:
                     sel_phone = str(s_row['phone'])
                     u_cnt, u_nms, _, _ = get_due_status(str(s_row['start_date']), sel_id)
                     tot_debt = u_cnt * s_row['rent_price']
+                    months_str = "، ".join(u_nms)
                     
-                    # 1. الواتساب
+                    # 1. إصلاح وتجهيز الواتساب (يقبل أي صيغة 06 أو 00212 أو +212)
                     if sel_phone and sel_phone.lower() != 'nan' and sel_phone.strip() != '':
-                        phone_clean = sel_phone.replace(" ", "").replace("+", "")
-                        msg = f"السلام عليكم السيد(ة) {selected_def_name}، المرجو تسوية وضعية الكراء الخاصة بالمحل. الشهور المتأخرة: {u_cnt} أشهر بمبلغ {tot_debt} درهم."
-                        whatsapp_url = f"https://wa.me/{phone_clean}?text={urllib.parse.quote(msg)}"
-                        st.markdown(f"**تواصل معه:** [📱 إرسال رسالة تذكير عبر الواتساب]({whatsapp_url})", unsafe_allow_html=True)
-                    else:
-                        st.warning("رقم الهاتف غير مسجل لهذا المكتري، لا يمكن إرسال واتساب.")
+                        p_clean = sel_phone.replace(" ", "").replace("+", "").replace("-", "")
+                        if p_clean.startswith("00212"): p_clean = p_clean[2:]
+                        elif p_clean.startswith("0"): p_clean = "212" + p_clean[1:]
+                        elif not p_clean.startswith("212"): p_clean = "212" + p_clean
                         
-                    # 2. ملفات الإنذار
+                        msg = f"السلام عليكم السيد(ة) {selected_def_name}، المرجو تسوية وضعية الكراء الخاصة بالمحل. الشهور المتأخرة: {u_cnt} أشهر بمبلغ {tot_debt} درهم."
+                        whatsapp_url = f"https://wa.me/{p_clean}?text={urllib.parse.quote(msg)}"
+                        st.markdown(f"**تواصل معه مباشرة:** [📱 إرسال رسالة تذكير عبر الواتساب]({whatsapp_url})", unsafe_allow_html=True)
+                    else:
+                        st.warning("رقم الهاتف غير مسجل لهذا المكتري.")
+                        
+                    # 2. توليد وطباعة الإنذارات تلقائياً
+                    st.markdown("### 📝 توليد وطباعة الإنذارات")
+                    col_gen1, col_gen2 = st.columns(2)
+                    
+                    date_today = datetime.today().strftime("%Y-%m-%d")
+                    notice_1_text = f"المملكة المغربية\nالتاريخ: {date_today}\n\nإلى السيد(ة): {selected_def_name}\nالعنوان: {s_row['address']}\n\nالموضوع: إنذار أول بتسوية وضعية الكراء\n\nسلام تام بوجود مولانا الإمام،\n\nوبعد، ننهي إلى علمكم أنكم مدينون بمبلغ {tot_debt} درهم، وهو ما يمثل واجب كراء المحل لمدة {u_cnt} أشهر ({months_str}).\nلذا، نطلب منكم تسوية هذه الوضعية في أجل أقصاه 15 يوماً من تاريخ التوصل بهذا الإنذار.\n\nوالسلام."
+                    
+                    notice_2_text = f"المملكة المغربية\nالتاريخ: {date_today}\n\nإلى السيد(ة): {selected_def_name}\nالعنوان: {s_row['address']}\n\nالموضوع: إنذار ثاني وأخير قبل الإفراغ\n\nسلام تام بوجود مولانا الإمام،\n\nإلحاقاً بإنذارنا الأول، ونظراً لعدم تسويتكم لوضعيتكم المادية حيث تبلغ ديونكم {tot_debt} درهم عن مدة {u_cnt} أشهر ({months_str}).\nفإننا نوجه لكم هذا الإنذار الثاني والأخير لتسوية وضعيتكم خلال 8 أيام، وإلا سنضطر آسفين لاتخاذ الإجراءات القانونية لفسخ العقد والإفراغ.\n\nوالسلام."
+                    
+                    with col_gen1:
+                        st.download_button("📥 توليد وتحميل الإنذار الأول", data=notice_1_text, file_name=f"إنذار_أول_{selected_def_name}.txt")
+                    with col_gen2:
+                        st.download_button("📥 توليد وتحميل الإنذار الثاني", data=notice_2_text, file_name=f"إنذار_ثاني_{selected_def_name}.txt")
+                        
+                    # 3. ملفات الإنذار (رفع الأرشيف بعد توقيعها من المكتري)
                     c.execute("SELECT notice_1_filename, notice_2_filename, cancellation_filename FROM tenants WHERE id = %s", (sel_id,))
                     f_res = c.fetchone()
                     
-                    st.markdown("### إدارة ملفات الإنذار والإفراغ")
+                    st.markdown("### 📁 أرشفة ملفات الإنذارات (بعد التوقيع)")
                     col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        st.markdown("**الإنذار الأول**")
+                        st.markdown("**رفع الإنذار الأول (موقع)**")
                         if f_res and f_res[0]: st.success(f"مرفوع: {f_res[0]}")
                         with st.form("form_n1", clear_on_submit=True):
-                            f1 = st.file_uploader("رفع الإنذار الأول", type=["pdf", "png", "jpg"], key="n1")
+                            f1 = st.file_uploader("", type=["pdf", "png", "jpg"], key="n1")
                             if st.form_submit_button("حفظ"):
                                 if f1:
                                     fb, fn = get_file_data(f1)
@@ -304,10 +323,10 @@ if t4 is not None:
                                     st.success("تم الرفع!")
                                     st.rerun()
                     with col2:
-                        st.markdown("**الإنذار الثاني**")
+                        st.markdown("**رفع الإنذار الثاني (موقع)**")
                         if f_res and f_res[1]: st.success(f"مرفوع: {f_res[1]}")
                         with st.form("form_n2", clear_on_submit=True):
-                            f2 = st.file_uploader("رفع الإنذار الثاني", type=["pdf", "png", "jpg"], key="n2")
+                            f2 = st.file_uploader("", type=["pdf", "png", "jpg"], key="n2")
                             if st.form_submit_button("حفظ"):
                                 if f2:
                                     fb, fn = get_file_data(f2)
@@ -315,10 +334,10 @@ if t4 is not None:
                                     st.success("تم الرفع!")
                                     st.rerun()
                     with col3:
-                        st.markdown("**طلب الإفراغ / الإلغاء**")
+                        st.markdown("**طلب الإفراغ النهائي**")
                         if f_res and f_res[2]: st.success(f"مرفوع: {f_res[2]}")
                         with st.form("form_c", clear_on_submit=True):
-                            fc = st.file_uploader("رفع طلب الإفراغ", type=["pdf", "png", "jpg"], key="nc")
+                            fc = st.file_uploader("", type=["pdf", "png", "jpg"], key="nc")
                             if st.form_submit_button("حفظ"):
                                 if fc:
                                     fb, fn = get_file_data(fc)
