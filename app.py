@@ -6,7 +6,65 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 io = __import__('io')
 
-# 1. إعداد الاتصال بقاعدة البيانات السحابية مع معالجة الأخطاء الذكية
+# إعداد الصفحة
+st.set_page_config(page_title="برنامج كراء المحلات", layout="wide", page_icon="🏢")
+
+# 1. نظام تسجيل الدخول مع تحديد صلاحيات دقيقة لكل مشرف
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+    st.session_state["username"] = ""
+    st.session_state["role"] = ""
+
+if not st.session_state["authenticated"]:
+    st.title("🔐 تسجيل الدخول إلى نظام المحلات")
+    with st.form("login_form"):
+        username = st.text_input("اسم المستخدم")
+        password = st.text_input("كلمة المرور", type="password")
+        submit_login = st.form_submit_button("دخول")
+        
+        if submit_login:
+            # يمكنك تعديل أسماء المستخدمين وكلمات المرور والصلاحيات هنا بحرية:
+            # 1. المشرف العام (له كل الصلاحيات)
+            if username == "admin" and password == "admin123":
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = "المشرف العام"
+                st.session_state["role"] = "SuperAdmin"
+                st.success("مرحباً بك أيها المشرف العام!")
+                st.rerun()
+            # 2. مشرف الشؤون المالية (مخصص للأداءات وتقارير البنك فقط)
+            elif username == "finance" and password == "fin123":
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = "مشرف الشؤون المالية"
+                st.session_state["role"] = "FinanceAdmin"
+                st.success("مرحباً بك! تم تسجيل الدخول بصلاحيات المالية.")
+                st.rerun()
+            # 3. المشرف الإداري (مخصص لإدارة المكترين والمتقاعسين فقط)
+            elif username == "admin_local" and password == "loc123":
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = "المشرف الإداري"
+                st.session_state["role"] = "LocalAdmin"
+                st.success("مرحباً بك! تم تسجيل الدخول بصلاحيات الإدارة.")
+                st.rerun()
+            # 4. مشاهد عادي (للاطلاع فقط)
+            elif username == "viewer" and password == "view123":
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = "مستخدم مشاهد"
+                st.session_state["role"] = "Viewer"
+                st.success("مرحباً بك! وضع المشاهدة فقط.")
+                st.rerun()
+            else:
+                st.error("اسم المستخدم أو كلمة المرور غير صحيحة.")
+    st.stop()
+
+# شريط جانبي لمعلومات المستخدم وتسجيل الخروج
+with st.sidebar:
+    st.write(f"👤 المستخدم: **{st.session_state['username']}**")
+    st.write(f"🛡️ الصلاحية: **{st.session_state['role']}**")
+    if st.button("تسجيل الخروج"):
+        st.session_state["authenticated"] = False
+        st.rerun()
+
+# 2. إعداد الاتصال بقاعدة البيانات السحابية
 @st.cache_resource
 def init_connection():
     try:
@@ -16,7 +74,7 @@ def init_connection():
         conn.autocommit = True
         return conn
     except Exception as e:
-        st.error("⚠️ تعذر الاتصال بقاعدة البيانات السحابية. يرجى التأكد من تفعيل المشروع في Supabase.")
+        st.error("⚠️ تعذر الاتصال بقاعدة البيانات السحابية.")
         st.stop()
 
 conn = init_connection()
@@ -26,10 +84,20 @@ def get_file_data(uploaded_file):
         return uploaded_file.getvalue(), uploaded_file.name
     return None, None
 
-# إنشاء مؤشر عام لتنفيذ الأوامر البسيطة
+def run_query(query, params=None):
+    cur = conn.cursor()
+    cur.execute(query, params)
+    if cur.description:
+        cols = [desc[0] for desc in cur.description]
+        data = cur.fetchall()
+        cur.close()
+        return pd.DataFrame(data, columns=cols)
+    cur.close()
+    return pd.DataFrame()
+
 c = conn.cursor()
 
-# 2. إنشاء الجداول السحابية والتأكد من وجود أعمدة الأرشيف والمراسلات للمتقاعسين
+# إنشاء الجداول الأساسية
 c.execute("""CREATE TABLE IF NOT EXISTS tenants (
     id SERIAL PRIMARY KEY, 
     name TEXT, cin TEXT, address TEXT, 
@@ -43,7 +111,6 @@ c.execute("""CREATE TABLE IF NOT EXISTS tenants (
     cancellation_file BYTEA, cancellation_filename TEXT
 )""")
 
-# التأكد من وجود أعمدة الرسائل والطلب في حال كان الجدول قديماً
 for col_name in ["notice_1_file BYTEA", "notice_1_filename TEXT", "notice_2_file BYTEA", "notice_2_filename TEXT", "cancellation_file BYTEA", "cancellation_filename TEXT"]:
     try:
         c.execute(f"ALTER TABLE tenants ADD COLUMN IF NOT EXISTS {col_name};")
@@ -62,13 +129,35 @@ c.execute("""CREATE TABLE IF NOT EXISTS payments (
     receipt_file BYTEA, receipt_filename TEXT
 )""")
 
-st.set_page_config(page_title="برنامج كراء المحلات", layout="wide", page_icon="🏢")
 st.title("🏢 نظام تسيير كراء المحلات التجاري")
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-    "➕ إضافة مكتري", "💰 تسجيل أداء (دفع)", "🏦 تقرير البنك", 
-    "⚖️ المتقاعسون", "🔍 البحث والتصفية", "🗑️ تصحيح الأخطاء", "⚙️ إدارة المكترين", "💾 النسخ الاحتياطي"
-])
+# تخصيص الألسنة (Tabs) بناءً على صلاحية المشرف
+role = st.session_state["role"]
+
+if role == "SuperAdmin":
+    # المشرف العام ترى لديه كافة الأقسام
+    tab_names = ["➕ إضافة مكتري", "💰 تسجيل أداء", "🏦 تقرير البنك", "⚖️ المتقاعسون", "🔍 البحث", "🗑️ تصحيح الأخطاء", "⚙️ إدارة المكترين", "💾 النسخ الاحتياطي"]
+    tabs = st.tabs(tab_names)
+    t1, t2, t3, t4, t5, t6, t7, t8 = tabs[0], tabs[1], tabs[2], tabs[3], tabs[4], tabs[5], tabs[6], tabs[7]
+
+elif role == "FinanceAdmin":
+    # مشرف المالية يرى فقط: تسجيل الأداء، تقرير البنك، البحث، النسخ الاحتياطي للأداءات
+    tabs = st.tabs(["💰 تسجيل أداء", "🏦 تقرير البنك", "🔍 البحث"])
+    t2, t3, t5 = tabs[0], tabs[1], tabs[2]
+    t1 = t4 = t6 = t7 = t8 = None
+
+elif role == "LocalAdmin":
+    # المشرف الإداري يرى فقط: إضافة مكتري، المتقاعسون، البحث، إدارة المكترين
+    tabs = st.tabs(["➕ إضافة مكتري", "⚖️ المتقاعسون", "🔍 البحث", "⚙️ إدارة المكترين"])
+    t1, t4, t5, t7 = tabs[0], tabs[1], tabs[2], tabs[3]
+    t2 = t3 = t6 = t8 = None
+
+else:
+    # المشاهد العادي يرى فقط: البحث وتقرير البنك والمتقاعسون
+    tabs = st.tabs(["🔍 البحث", "🏦 تقرير البنك", "⚖️ المتقاعسون"])
+    t3, t4, t5 = tabs[1], tabs[2], tabs[0]
+    t1 = t2 = t6 = t7 = t8 = None
+
 
 def get_due_status(start_date_str, tenant_id):
     local_cur = conn.cursor()
@@ -86,7 +175,6 @@ def get_due_status(start_date_str, tenant_id):
     local_cur.close()
     
     paid_months = result if result else 0
-    
     unpaid_months_count = total_months_since_start - paid_months
     if unpaid_months_count < 0: unpaid_months_count = 0
     
@@ -101,647 +189,194 @@ def get_due_status(start_date_str, tenant_id):
     unpaid_names = next_months_names[:int(unpaid_months_count)]
     return unpaid_months_count, unpaid_names, next_months_names, paid_months
 
-# 3. جلب الأصناف المتاحة ديناميكياً لتحديث الفلاتر
 default_categories = ["بيع الدواجن", "بيع اللحوم", "المطاعم", "محلات صنف 1", "محلات صنف 2", "أصناف أخرى"]
 try:
-    c.execute("SELECT DISTINCT shop_category FROM tenants WHERE shop_category IS NOT NULL AND shop_category != ''")
-    db_categories = [row[0] for row in c.fetchall()]
+    cat_df = run_query("SELECT DISTINCT shop_category FROM tenants WHERE shop_category IS NOT NULL AND shop_category != ''")
+    db_categories = cat_df['shop_category'].tolist() if not cat_df.empty else []
     category_options = list(dict.fromkeys(default_categories + db_categories))
 except:
     category_options = default_categories
 
-# الواجهة 1: إدخال المكترين
-with tab1:
-    st.subheader("إضافة مكتري جديد")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**إضافة مكتري يدوياً مع المرفقات**")
-        with st.form("add_tenant_form", clear_on_submit=True):
-            name = st.text_input("الاسم الكامل *")
-            phone = st.text_input("رقم الهاتف (للتواصل عبر الواتساب)")
-            cin = st.text_input("رقم البطاقة الوطنية")
-            address = st.text_input("عنوان أو رقم المحل")
-            
-            shop_category = st.selectbox("صنف المحل *", options=category_options)
-            
-            contract = st.text_input("رقم عقد الكراء")
-            start_date = st.date_input("تاريخ بداية الكراء")
-            rent_price = st.number_input("ثمن الكراء الشهري (درهم) *", min_value=0.0, step=100.0)
-            
-            st.markdown("**(اختياري) رفع المستندات الأساسية:**")
-            id_card_file = st.file_uploader("نسخة البطاقة الوطنية", type=["pdf", "png", "jpg", "jpeg"], key="add_id_file")
-            contract_file = st.file_uploader("نسخة عقد الكراء", type=["pdf", "png", "jpg", "jpeg"], key="add_contract_file")
-            conditions_file = st.file_uploader("كناش التحملات", type=["pdf", "png", "jpg", "jpeg"], key="add_cond_file")
-            
-            submitted = st.form_submit_button("حفظ بيانات المكتري")
-            if submitted:
-                if name and rent_price > 0:
-                    id_bytes, id_name = get_file_data(id_card_file)
-                    contract_bytes, contract_name = get_file_data(contract_file)
-                    cond_bytes, cond_name = get_file_data(conditions_file)
-                    
-                    c.execute(
-                        "INSERT INTO tenants (name, cin, address, shop_category, contract_id, start_date, rent_price, phone, "
-                        "id_card_file, id_card_filename, contract_file, contract_filename, conditions_file, conditions_filename) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (name, cin, address, shop_category, contract, str(start_date), rent_price, phone, 
-                         id_bytes, id_name, contract_bytes, contract_name, cond_bytes, cond_name)
-                    )
-                    st.success("تم حفظ المكتري ومرفقاته بنجاح!")
-                else:
-                    st.error("المرجو إدخال اسم المكتري وثمن الكراء.")
-                    
-    with col2:
-        st.markdown("**استيراد المكترين من ملف Excel 📥**")
-        
-        excel_default_category = st.selectbox("اختر الصنف الذي ينتمي له هؤلاء المكترون:", options=category_options, key="excel_cat")
-        
-        uploaded_file = st.file_uploader("اختر ملف Excel (.xlsx)", type=["xlsx"])
-        if uploaded_file is not None:
-            df_excel = pd.read_excel(uploaded_file)
-            if st.button("تأكيد استيراد البيانات"):
+
+# --- الواجهة 1: إضافة مكتري ---
+if t1 is not None:
+    with t1:
+        st.subheader("إضافة مكتري جديد")
+        col1, col2 = st.columns(2)
+        with col1:
+            with st.form("add_tenant_form", clear_on_submit=True):
+                name = st.text_input("الاسم الكامل *")
+                phone = st.text_input("رقم الهاتف")
+                cin = st.text_input("رقم البطاقة الوطنية")
+                address = st.text_input("عنوان أو رقم المحل")
+                shop_category = st.selectbox("صنف المحل *", options=category_options)
+                contract = st.text_input("رقم عقد الكراء")
+                start_date = st.date_input("تاريخ بداية الكراء")
+                rent_price = st.number_input("ثمن الكراء الشهري (درهم) *", min_value=0.0, step=100.0)
                 
-                imported_count = 0
-                for index, row in df_excel.iterrows():
-                    t_name = ""
-                    for col in df_excel.columns:
-                        if "الاسم" in str(col) or "اسم" in str(col):
-                            t_name = str(row[col])
-                            break
-                            
-                    if t_name.strip() != "" and t_name.strip() != "nan":
-                        
-                        raw_date = datetime.today().date()
-                        for col in df_excel.columns:
-                            if "تاريخ" in str(col) or "بداية" in str(col):
-                                raw_date = row[col]
-                                break
-                        try:
-                            t_date = pd.to_datetime(raw_date).strftime("%Y-%m-%d")
-                        except:
-                            t_date = str(datetime.today().date())
-                            
-                        t_rent = 0.0
-                        for col in df_excel.columns:
-                            if "ثمن" in str(col) or "المبلغ" in str(col):
-                                val = row[col]
-                                if pd.notna(val):
-                                    clean_val = "".join(ch for ch in str(val) if ch.isdigit() or ch == '.')
-                                    if clean_val:
-                                        t_rent = float(clean_val)
-                                break
-                        
-                        t_cin = ""
-                        for col in df_excel.columns:
-                            if "بطاقة" in str(col) or "CIN" in str(col):
-                                val = row[col]
-                                if pd.notna(val): t_cin = str(val)
-                                break
-                                
-                        t_address = ""
-                        for col in df_excel.columns:
-                            if "عنوان" in str(col) or "محل" in str(col):
-                                val = row[col]
-                                if pd.notna(val): t_address = str(val)
-                                break
-                                
-                        t_contract = ""
-                        for col in df_excel.columns:
-                            if "عقد" in str(col) and "ثمن" not in str(col):
-                                val = row[col]
-                                if pd.notna(val): t_contract = str(val)
-                                break
-                        
-                        t_category = excel_default_category
-                        for col in df_excel.columns:
-                            if "صنف" in str(col) or "نوع" in str(col):
-                                val = row[col]
-                                if pd.notna(val) and str(val).strip() != "nan":
-                                    t_category = str(val).strip()
-                                break
-                                
-                        t_phone = ""
+                id_card_file = st.file_uploader("نسخة البطاقة الوطنية", type=["pdf", "png", "jpg", "jpeg"], key="add_id_file")
+                contract_file = st.file_uploader("نسخة عقد الكراء", type=["pdf", "png", "jpg", "jpeg"], key="add_contract_file")
+                conditions_file = st.file_uploader("كناش التحملات", type=["pdf", "png", "jpg", "jpeg"], key="add_cond_file")
+                
+                if st.form_submit_button("حفظ بيانات المكتري"):
+                    if name and rent_price > 0:
+                        id_bytes, id_name = get_file_data(id_card_file)
+                        contract_bytes, contract_name = get_file_data(contract_file)
+                        cond_bytes, cond_name = get_file_data(conditions_file)
                         
                         c.execute(
-                            "INSERT INTO tenants (name, cin, address, shop_category, contract_id, start_date, rent_price, phone) "
-                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                            (t_name, t_cin, t_address, t_category, t_contract, t_date, t_rent, t_phone)
+                            "INSERT INTO tenants (name, cin, address, shop_category, contract_id, start_date, rent_price, phone, "
+                            "id_card_file, id_card_filename, contract_file, contract_filename, conditions_file, conditions_filename) "
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            (name, cin, address, shop_category, contract, str(start_date), rent_price, phone, 
+                             id_bytes, id_name, contract_bytes, contract_name, cond_bytes, cond_name)
                         )
-                        imported_count += 1
-                        
-                st.success(f"تم بنجاح استيراد {imported_count} مكتري، وتثبيت ثمن الكراء وتواريخ البداية بدقة تامة!")
+                        st.success("تم حفظ المكتري بنجاح!")
+                    else:
+                        st.error("المرجو إدخال الاسم وثمن الكراء.")
 
-# الواجهة 2: تسجيل الأداءات
-with tab2:
-    st.subheader("تسجيل أداء جديد مع وصل الدفع")
-    selected_filter_cat = st.selectbox("فلترة المكترين حسب الصنف لاختيار أسرع:", options=["الكل"] + category_options, key="pay_cat_filter")
-    
-    if selected_filter_cat == "الكل":
-        tenants_df = pd.read_sql_query("SELECT id, name, rent_price, start_date FROM tenants", conn)
-    else:
-        tenants_df = pd.read_sql_query("SELECT id, name, rent_price, start_date FROM tenants WHERE shop_category = %s", conn, params=(selected_filter_cat,))
-    
-    if not tenants_df.empty:
-        tenant_dict = dict(zip(tenants_df.name, tenants_df.id))
-        selected_tenant = st.selectbox("اختر المكتري", options=list(tenant_dict.keys()))
-        t_id = int(tenant_dict[selected_tenant])
+
+# --- الواجهة 2: تسجيل الأداء ---
+if t2 is not None:
+    with t2:
+        st.subheader("تسجيل أداء جديد مع وصل الدفع")
+        selected_filter_cat = st.selectbox("فلترة المكترين حسب الصنف:", options=["الكل"] + category_options, key="pay_cat_filter")
+        tenants_df = run_query("SELECT id, name, rent_price, start_date FROM tenants") if selected_filter_cat == "الكل" else run_query("SELECT id, name, rent_price, start_date FROM tenants WHERE shop_category = %s", (selected_filter_cat,))
         
-        current_tenant_rent = float(tenants_df.loc[tenants_df['name'] == selected_tenant, 'rent_price'].values[0])
-        start_date_str = str(tenants_df.loc[tenants_df['name'] == selected_tenant, 'start_date'].values[0])
-        
-        unpaid_count, unpaid_names, next_months_names, paid_months = get_due_status(start_date_str, t_id)
-        
-        if unpaid_count > 0:
-            st.error(f"الأشهر المستحقة المتأخرة: {unpaid_count} شهر")
-        
-        selected_months = st.multiselect("اختر الأشهر المراد أداؤها:", options=next_months_names, default=unpaid_names if unpaid_count > 0 else [])
-        months_paid = len(selected_months)
-        calculated_amount = float(current_tenant_rent * months_paid) if current_tenant_rent else 0.0
-        
-        with st.form("payment_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            amount = c1.number_input("المبلغ الإجمالي المدفوع (درهم)", value=calculated_amount, min_value=0.0, step=100.0)
-            payment_date = c2.date_input("تاريخ الأداء", datetime.today())
-            employee_name = st.text_input("اسم الموظف المستخلص")
+        if not tenants_df.empty:
+            tenant_dict = dict(zip(tenants_df.name, tenants_df.id))
+            selected_tenant = st.selectbox("اختر المكتري", options=list(tenant_dict.keys()))
+            t_id = int(tenant_dict[selected_tenant])
+            current_tenant_rent = float(tenants_df.loc[tenants_df['name'] == selected_tenant, 'rent_price'].values[0])
+            start_date_str = str(tenants_df.loc[tenants_df['name'] == selected_tenant, 'start_date'].values[0])
             
-            st.markdown("**(اختياري) رفع وصل الأداء (التوصيل):**")
-            receipt_file = st.file_uploader("اختر صورة أو ملف الوصل", type=["pdf", "png", "jpg", "jpeg"], key="payment_receipt_file")
+            unpaid_count, unpaid_names, next_months_names, paid_months = get_due_status(start_date_str, t_id)
+            selected_months = st.multiselect("اختر الأشهر المراد أداؤها:", options=next_months_names, default=unpaid_names if unpaid_count > 0 else [])
+            months_paid = len(selected_months)
+            calculated_amount = float(current_tenant_rent * months_paid) if current_tenant_rent else 0.0
             
-            if st.form_submit_button("تأكيد وتسجيل الأداء"):
-                if months_paid == 0:
-                    st.warning("المرجو اختيار شهر واحد على الأقل ليتم تسجيله.")
-                else:
-                    paid_months_str = "، ".join(selected_months)
-                    receipt_bytes, receipt_name = get_file_data(receipt_file)
-                    
-                    c.execute(
-                        "INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (t_id, selected_tenant, months_paid, amount, str(payment_date), employee_name, paid_months_str, receipt_bytes, receipt_name)
-                    )
-                    st.success("تم تسجيل الأداء بنجاح!")
-                    st.rerun()
-    else:
-        st.warning("لا توجد مكترون في هذا الصنف أو لم تقم بإضافة مكتري بعد.")
-
-# الواجهة 3: تقرير البنك
-with tab3:
-    st.subheader("تقرير التوريد للبنك")
-    d1, d2 = st.columns(2)
-    start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1))
-    end_d = d2.date_input("إلى تاريخ", value=datetime.today())
-    
-    query = """
-        SELECT tenant_name AS "اسم المكتري", 
-               months_paid AS "عدد الأشهر", 
-               paid_months_names AS "الأشهر المؤداة", 
-               amount AS "المبلغ", 
-               payment_date AS "تاريخ الأداء", 
-               employee AS "الموظف" 
-        FROM payments 
-        WHERE payment_date BETWEEN %s AND %s
-    """
-    df = pd.read_sql_query(query, conn, params=(str(start_d), str(end_d)))
-    
-    if not df.empty:
-        st.dataframe(df, width='stretch')
-        st.success(f"المبلغ الإجمالي الموجه للبنك: {df['المبلغ'].sum()} درهم")
-        
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='التقرير')
-        st.download_button(label="📥 تحميل التقرير كملف Excel", data=output.getvalue(), file_name="تقرير_البنك.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    else:
-        st.warning("لا توجد أداءات في هذه الفترة.")
-
-# الواجهة 4: المتقاعسون والرسائل الرسمية (مع إمكانية رفع نسخ الرسائل المرسلة وطلب الإلغاء)
-with tab4:
-    st.subheader("الإنذارات ومتابعة المراسلات وطلبات الإلغاء")
-    defaulter_filter_cat = st.selectbox("فلترة المتقاعسين حسب الصنف:", options=["الكل"] + category_options, key="def_cat_filter")
-    
-    if defaulter_filter_cat == "الكل":
-        tenants_df = pd.read_sql_query("SELECT DISTINCT id, name, cin, address, shop_category, rent_price, phone, start_date FROM tenants", conn)
-    else:
-        tenants_df = pd.read_sql_query("SELECT DISTINCT id, name, cin, address, shop_category, rent_price, phone, start_date FROM tenants WHERE shop_category = %s", conn, params=(defaulter_filter_cat,))
-        
-    defaulters = []
-    for index, row in tenants_df.iterrows():
-        t_id = int(row['id'])
-        start_date_str = str(row['start_date'])
-        unpaid_count, unpaid_names, _, _ = get_due_status(start_date_str, t_id)
-        if unpaid_count > 0:
-            defaulters.append({
-                "id": t_id,
-                "الاسم": row['name'], "البطاقة": row['cin'], "الصنف": row.get('shop_category', ''),
-                "الهاتف": row.get('phone', ''), "العنوان": row['address'], "ثمن الكراء": row['rent_price'],
-                "عدد أشهر التأخير": unpaid_count, "المبلغ المتأخر": unpaid_count * row['rent_price'],
-                "الأشهر المتأخرة": "، ".join(unpaid_names)
-            })
-            
-    if defaulters:
-        df_defaulters = pd.DataFrame(defaulters).drop_duplicates(subset=["الاسم"])
-        st.dataframe(df_defaulters.drop(columns=["id"]), width='stretch')
-        
-        st.markdown("### 📄 المعاينة، التحميل، ورفع وثائق المراسلات")
-        selected_defaulter = st.selectbox("اختر المكتري لإدارة مراسلاته وملفاته:", options=df_defaulters["الاسم"])
-        if selected_defaulter:
-            row_match = df_defaulters[df_defaulters["الاسم"] == selected_defaulter].iloc[0]
-            d_id = int(row_match["id"])
-            
-            # جلب الملفات المرفوعة مسبقاً لهذا المكتري إن وجدت
-            c.execute("SELECT notice_1_filename, notice_2_filename, cancellation_filename FROM tenants WHERE id = %s", (d_id,))
-            files_db = c.fetchone()
-            n1_fn = files_db[0] if files_db else None
-            n2_fn = files_db[1] if files_db else None
-            canc_fn = files_db[2] if files_db else None
-
-            letter_1 = f"""المملكة المغربية
-عمالة إقليم بنسليمان
-جماعة شراط
-مصلحة الشؤون المالية و الاقتصادية
-
-شراط في: {datetime.today().strftime('%Y-%m-%d')}
-
-من رئيس المجلس الجماعي لشراط
-إلى السيد(ة): {row_match['الاسم']}
-رقم البطاقة الوطنية: {row_match['البطاقة']}
-العنوان (المحل): {row_match['العنوان']} ({row_match['الصنف']})
-
-الموضوع: إنذار أول بأداء واجبات الكراء.
-
-سلام تام بوجود مولانا الإمام،
-وبعد، أخبركم أنكم لم تقوموا بأداء الكراء الشهري عن الأشهر التالية:
-({row_match['الأشهر المتأخرة']})
-
-لذا أنتم مطالبون بتسوية وضعيتكم الجبائية تجاه الجماعة في أقرب وقت، وذلك داخل أجل 15 يوما من تاريخ تسلمكم هذه الرسالة.
-
-والسلام
-امضاء الرئيس:"""
-
-            letter_2 = f"""المملكة المغربية
-عمالة إقليم بنسليمان
-جماعة شراط
-مصلحة الشؤون المالية و الاقتصادية
-
-شراط في: {datetime.today().strftime('%Y-%m-%d')}
-
-من رئيس المجلس الجماعي لشراط
-إلى السيد(ة): {row_match['الاسم']}
-رقم البطاقة الوطنية: {row_match['البطاقة']}
-العنوان (المحل): {row_match['العنوان']} ({row_match['الصنف']})
-
-الموضوع: إنذار ثاني ونهائي بأداء واجبات الكراء.
-
-سلام تام بوجود مولانا الإمام،
-وبعد، إلحاقاً بالإنذار الأول، ونظراً لتمرسكم في عدم تسديد واجبات الكراء عن الأشهر:
-({row_match['الأشهر المتأخرة']})
-
-نخبركم أن هذا إنذار نهائي داخل أجل 7 أيام، وفي حالة التخلف، ستضطر الجماعة لاتخاذ الإجراءات القانونية والإدارية لسحب المحل وفرض المساطر الجبائية المعمول بها.
-
-والسلام
-امضاء الرئيس:"""
-
-            cancellation_request = f"""إلى السيد: رئيس المجلس الجماعي لشراط
-الموضوع: طلب إلغاء استغلال المحل التجاري / عقد الكراء.
-
-سلام تام بوجود مولانا الإمام،
-أنا الموقعة أسفله:
-الاسم الكامل: {row_match['الاسم']}
-رقم البطاقة الوطنية: {row_match['البطاقة']}
-رقم المحل / العنوان: {row_match['العنوان']} ({row_match['الصنف']})
-
-أتقدم إلى سيادتكم بطلبي هذا قصد الموافقة على إلغاء استفادتي من المحل التجاري المذكور أعلاه وتسليم مفاتيحه للجماعة، نظراً لظروفي الخاصة، مع إبراء ذمتي المالية.
-
-وتفضلوا بقبول فائق الاحترام والتقدير.
-
-الإمضاء:
-التاريخ: {datetime.today().strftime('%Y-%m-%d')}"""
-
-            tab_l1, tab_l2, tab_canc = st.tabs(["📩 الرسالة الأولى ومتابعتها", "⚠️ الرسالة الثانية ومتابعتها", "📝 طلب الإلغاء وأرشفته"])
-            
-            with tab_l1:
-                st.text_area("نص الرسالة الأولى:", letter_1, height=180, key="txt_l1")
-                doc1 = io.BytesIO()
-                doc1.write(letter_1.encode('utf-8'))
-                st.download_button("📥 تحميل قالب الرسالة الأولى", data=doc1.getvalue(), file_name=f"الإنذار_الأول_{row_match['الاسم']}.doc", mime="application/msword")
+            with st.form("payment_form", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                amount = c1.number_input("المبلغ الإجمالي المدفوع (درهم)", value=calculated_amount, min_value=0.0, step=100.0)
+                payment_date = c2.date_input("تاريخ الأداء", datetime.today())
+                employee_name = st.text_input("اسم الموظف المستخلص")
+                receipt_file = st.file_uploader("صورة أو ملف وصل الأداء", type=["pdf", "png", "jpg", "jpeg"], key="payment_receipt_file")
                 
-                st.markdown("---")
-                st.markdown("**أرشيف الرسالة الأولى (بعد إرسالها):**")
-                if n1_fn:
-                    st.success(f"✅ تم رفع نسخة الرسالة الأولى مسبقاً: {n1_fn}")
-                up_n1 = st.file_uploader("ارفع نسخة الرسالة الأولى المرسلة (صورة أو PDF):", type=["pdf", "png", "jpg", "jpeg"], key="up_n1_file")
-                if up_n1:
-                    b_n1, name_n1 = get_file_data(up_n1)
-                    c.execute("UPDATE tenants SET notice_1_file = %s, notice_1_filename = %s WHERE id = %s", (b_n1, name_n1, d_id))
-                    st.success("تم رفع وحفظ نسخة الرسالة الأولى في أرشيف المكتري بنجاح!")
-            
-            with tab_l2:
-                st.text_area("نص الرسالة الثانية:", letter_2, height=180, key="txt_l2")
-                doc2 = io.BytesIO()
-                doc2.write(letter_2.encode('utf-8'))
-                st.download_button("📥 تحميل قالب الرسالة الثانية", data=doc2.getvalue(), file_name=f"الإنذار_الثاني_{row_match['الاسم']}.doc", mime="application/msword")
-                
-                st.markdown("---")
-                st.markdown("**أرشيف الرسالة الثانية (بعد إرسالها):**")
-                if n2_fn:
-                    st.success(f"✅ تم رفع نسخة الرسالة الثانية مسبقاً: {n2_fn}")
-                up_n2 = st.file_uploader("ارفع نسخة الرسالة الثانية المرسلة (صورة أو PDF):", type=["pdf", "png", "jpg", "jpeg"], key="up_n2_file")
-                if up_n2:
-                    b_n2, name_n2 = get_file_data(up_n2)
-                    c.execute("UPDATE tenants SET notice_2_file = %s, notice_2_filename = %s WHERE id = %s", (b_n2, name_n2, d_id))
-                    st.success("تم رفع وحفظ نسخة الرسالة الثانية في أرشيف المكتري بنجاح!")
-                
-            with tab_canc:
-                st.text_area("نص طلب الإلغاء:", cancellation_request, height=180, key="txt_canc")
-                doc_canc = io.BytesIO()
-                doc_canc.write(cancellation_request.encode('utf-8'))
-                st.download_button("📥 تحميل نموذج طلب الإلغاء", data=doc_canc.getvalue(), file_name=f"طلب_إلغاء_{row_match['الاسم']}.doc", mime="application/msword")
-                
-                st.markdown("---")
-                st.markdown("**أرشيف طلب الإلغاء المقدم من المكتري:**")
-                if canc_fn:
-                    st.success(f"✅ تم رفع طلب الإلغاء مسبقاً: {canc_fn}")
-                up_canc = st.file_uploader("ارفع صورة أو ملف طلب الإلغاء الذي وقعه المكتري:", type=["pdf", "png", "jpg", "jpeg"], key="up_canc_file")
-                if up_canc:
-                    b_canc, name_canc = get_file_data(up_canc)
-                    c.execute("UPDATE tenants SET cancellation_file = %s, cancellation_filename = %s WHERE id = %s", (b_canc, name_canc, d_id))
-                    st.success("تم رفع وحفظ طلب الإلغاء في أرشيف المكتري بنجاح!")
+                if st.form_submit_button("تأكيد وتسجيل الأداء"):
+                    if months_paid == 0:
+                        st.warning("المرجو اختيار شهر واحد على الأقل.")
+                    else:
+                        paid_months_str = "، ".join(selected_months)
+                        receipt_bytes, receipt_name = get_file_data(receipt_file)
+                        c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                                  (t_id, selected_tenant, months_paid, amount, str(payment_date), employee_name, paid_months_str, receipt_bytes, receipt_name))
+                        st.success("تم تسجيل الأداء بنجاح!")
+                        st.rerun()
 
-            st.markdown("---")
-            if row_match['الهاتف']:
-                phone_str = str(row_match['الهاتف']).replace("+", "").replace(" ", "")
-                wa_link = f"https://wa.me/{phone_str}?text={urllib.parse.quote(letter_1)}"
-                st.markdown(f'<a href="{wa_link}" target="_blank" style="background-color:#25D366; color:white; padding:10px 20px; text-decoration:none; border-radius:5px; font-weight:bold; display:inline-block; text-align:center; width:100%;">📲 إرسال الإنذار الأول عبر الواتساب</a>', unsafe_allow_html=True)
-    else:
-        st.success("لا يوجد أي متقاعسين حالياً في هذا الصنف.")
 
-# الواجهة 5: البحث وعرض المرفقات والأشهر غير المؤداة
-with tab5:
-    st.subheader("البحث عن مكتري وعرض المرفقات وحالة الأشهر")
-    search_q = st.text_input("أدخل اسم المكتري (يقبل الحروف الكبيرة والصغيرة):")
-    if search_q:
-        safe_q = f"%{search_q}%"
-        df_search = pd.read_sql_query("SELECT * FROM tenants WHERE name ILIKE %s", conn, params=(safe_q,))
-        if not df_search.empty:
-            t_data = df_search.iloc[0]
-            t_id = int(t_data['id'])
+# --- الواجهة 3: تقرير البنك ---
+if t3 is not None:
+    with t3:
+        st.subheader("تقرير التوريد للبنك")
+        d1, d2 = st.columns(2)
+        start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1), key="b_d1")
+        end_d = d2.date_input("إلى تاريخ", value=datetime.today(), key="b_d2")
+        df = run_query("SELECT tenant_name AS \"اسم المكتري\", months_paid AS \"عدد الأشهر\", paid_months_names AS \"الأشهر المؤداة\", amount AS \"المبلغ\", payment_date AS \"تاريخ الأداء\", employee AS \"الموظف\" FROM payments WHERE payment_date BETWEEN %s AND %s", (str(start_d), str(end_d)))
+        if not df.empty:
+            st.dataframe(df, width='stretch')
+            st.success(f"المبلغ الإجمالي الموجه للبنك: {df['المبلغ'].sum()} درهم")
             
-            st.markdown(f"### 👤 بيانات المكتري: {t_data['name']}")
-            st.write(f"**البطاقة الوطنية:** {t_data['cin']} | **صنف المحل:** {t_data.get('shop_category', 'غير متوفر')} | **الهاتف:** {t_data.get('phone', 'غير متوفر')}")
-            st.write(f"**العنوان:** {t_data['address']} | **ثمن الكراء:** {t_data['rent_price']} درهم | **تاريخ البداية:** {t_data['start_date']}")
-            
-            unpaid_count, unpaid_names, _, paid_months = get_due_status(str(t_data['start_date']), t_id)
-            st.info(f"📊 عدد الأشهر المؤداة سابقاً: {paid_months} شهر | ⚠️ الأشهر المتأخرة غير المؤداة ({unpaid_count} شهر): {', '.join(unpaid_names) if unpaid_names else 'لا توجد متأخرات'}")
-            
-            st.markdown("#### 📂 الملفات والمستندات المرفقة:")
-            cols = st.columns(3)
-            
-            id_file_data = t_data.get('id_card_file')
-            id_file_name = t_data.get('id_card_filename')
-            if id_file_data is not None and id_file_name:
-                if isinstance(id_file_data, memoryview):
-                    id_file_data = bytes(id_file_data)
-                cols[0].download_button("📥 تحميل البطاقة", data=id_file_data, file_name=id_file_name, key=f"dl_id_{t_id}")
-            else:
-                cols[0].write("البطاقة: ❌ غير متوفرة")
-            
-            contract_file_data = t_data.get('contract_file')
-            contract_file_name = t_data.get('contract_filename')
-            if contract_file_data is not None and contract_file_name:
-                if isinstance(contract_file_data, memoryview):
-                    contract_file_data = bytes(contract_file_data)
-                cols[1].download_button("📥 تحميل العقد", data=contract_file_data, file_name=contract_file_name, key=f"dl_contract_{t_id}")
-            else:
-                cols[1].write("عقد الكراء: ❌ غير متوفر")
-            
-            cond_file_data = t_data.get('conditions_file')
-            cond_file_name = t_data.get('conditions_filename')
-            if cond_file_data is not None and cond_file_name:
-                if isinstance(cond_file_data, memoryview):
-                    cond_file_data = bytes(cond_file_data)
-                cols[2].download_button("📥 تحميل الكناش", data=cond_file_data, file_name=cond_file_name, key=f"dl_cond_{t_id}")
-            else:
-                cols[2].write("كناش التحملات: ❌ غير متوفر")
-                
-            # عرض أزرار تحميل المراسلات وطلب الإلغاء إن وجدت مرفوعة
-            st.markdown("**أرشيف الإنذارات وطلبات الإلغاء للمكتري:**")
-            col_m1, col_m2, col_m3 = st.columns(3)
-            
-            n1_d = t_data.get('notice_1_file')
-            n1_n = t_data.get('notice_1_filename')
-            if n1_d is not None and n1_n:
-                if isinstance(n1_d, memoryview): n1_d = bytes(n1_d)
-                col_m1.download_button("📥 تحميل نسخة الإنذار 1", data=n1_d, file_name=n1_n, key=f"dl_n1_{t_id}")
-            else:
-                col_m1.write("الإنذار 1 المرسل: ❌ غير مرفوع")
-                
-            n2_d = t_data.get('notice_2_file')
-            n2_n = t_data.get('notice_2_filename')
-            if n2_d is not None and n2_n:
-                if isinstance(n2_d, memoryview): n2_d = bytes(n2_d)
-                col_m2.download_button("📥 تحميل نسخة الإنذار 2", data=n2_d, file_name=n2_n, key=f"dl_n2_{t_id}")
-            else:
-                col_m2.write("الإنذار 2 المرسل: ❌ غير مرفوع")
-                
-            canc_d = t_data.get('cancellation_file')
-            canc_n = t_data.get('cancellation_filename')
-            if canc_d is not None and canc_n:
-                if isinstance(canc_d, memoryview): canc_d = bytes(canc_d)
-                col_m3.download_button("📥 تحميل طلب الإلغاء", data=canc_d, file_name=canc_n, key=f"dl_canc_{t_id}")
-            else:
-                col_m3.write("طلب الإلغاء: ❌ غير مرفوع")
-            
-            st.markdown("---")
-            st.markdown("### 📜 سجل الأداءات (المدفوعة)")
-            df_payments = pd.read_sql_query("SELECT * FROM payments WHERE tenant_id = %s", conn, params=(t_id,))
-            if not df_payments.empty:
-                for index, p_row in df_payments.iterrows():
-                    with st.expander(f"أداء بتاريخ: {p_row['payment_date']} | المبلغ: {p_row['amount']} درهم"):
-                        st.write(f"**الأشهر المؤداة:** {p_row['paid_months_names']}")
-                        st.write(f"**الموظف المستخلص:** {p_row['employee']}")
-                        
-                        receipt_data = p_row.get('receipt_file')
-                        receipt_name = p_row.get('receipt_filename')
-                        if receipt_data is not None and receipt_name:
-                            if isinstance(receipt_data, memoryview):
-                                receipt_data = bytes(receipt_data)
-                            st.download_button("📥 تحميل صورة الوصل", data=receipt_data, file_name=receipt_name, key=f"receipt_{p_row['id']}")
-                        else:
-                            st.write("صورة الوصل: ❌ غير متوفرة")
-            else:
-                st.info("لم يقم هذا المكتري بأي أداء بعد.")
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False, sheet_name='التقرير')
+            st.download_button("📥 تحميل التقرير كملف Excel", data=output.getvalue(), file_name="تقرير_البنك.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         else:
-            st.warning("لا يوجد مكتري بهذا الاسم")
+            st.warning("لا توجد أداءات في هذه الفترة.")
 
-# الواجهة 6: تصحيح الأخطاء
-with tab6:
-    st.subheader("إلغاء عملية أداء تم تسجيلها بالخطأ")
-    query_recent = """
-        SELECT id AS "رقم العملية", 
-               tenant_name AS "اسم المكتري", 
-               months_paid AS "عدد الأشهر", 
-               paid_months_names AS "الأشهر المؤداة", 
-               amount AS "المبلغ", 
-               payment_date AS "تاريخ الأداء" 
-        FROM payments 
-        ORDER BY id DESC 
-        LIMIT 50
-    """
-    df_recent = pd.read_sql_query(query_recent, conn)
-    if not df_recent.empty:
-        st.dataframe(df_recent, width='stretch')
-        c1, c2 = st.columns(2)
-        payment_id_to_delete = c1.number_input("أدخل 'رقم العملية' المراد حذفها:", min_value=0, step=1, value=0)
-        if c1.button("🗑️ حذف العملية نهائياً"):
-            if payment_id_to_delete > 0:
-                c.execute("DELETE FROM payments WHERE id = %s", (int(payment_id_to_delete),))
-                st.success("تم الحذف بنجاح!")
-                st.rerun()
 
-# الواجهة 7: إدارة المكترين
-with tab7:
-    st.subheader("إدارة المكترين (تعديل البيانات، العنوان، الثمن، التاريخ، أو الحذف)")
-    manage_filter_cat = st.selectbox("فلترة قائمة الإدارة حسب الصنف:", options=["الكل"] + category_options, key="manage_cat_filter")
-    
-    if manage_filter_cat == "الكل":
-        tenants_edit_df = pd.read_sql_query("SELECT id, name FROM tenants", conn)
-    else:
-        tenants_edit_df = pd.read_sql_query("SELECT id, name FROM tenants WHERE shop_category = %s", conn, params=(manage_filter_cat,))
+# --- الواجهة 4: المتقاعسون ---
+if t4 is not None:
+    with t4:
+        st.subheader("الإنذارات ومتابعة المراسلات وطلبات الإلغاء")
+        defaulter_filter_cat = st.selectbox("فلترة المتقاعسين حسب الصنف:", options=["الكل"] + category_options, key="def_cat_filter")
+        tenants_df = run_query("SELECT DISTINCT id, name, cin, address, shop_category, rent_price, phone, start_date FROM tenants") if defaulter_filter_cat == "الكل" else run_query("SELECT DISTINCT id, name, cin, address, shop_category, rent_price, phone, start_date FROM tenants WHERE shop_category = %s", (defaulter_filter_cat,))
         
-    if not tenants_edit_df.empty:
-        edit_dict = dict(zip(tenants_edit_df.name, tenants_edit_df.id))
-        
-        st.markdown("### 👤 التعديل أو الحذف الفردي")
-        selected_edit_tenant = st.selectbox("اختر المكتري للتعديل أو الحذف الفردي:", options=list(edit_dict.keys()))
-        t_edit_id = int(edit_dict[selected_edit_tenant])
-        
-        colA, colB = st.columns(2)
-        
-        with colA:
+        defaulters = []
+        for index, row in tenants_df.iterrows():
+            t_id = int(row['id'])
+            unpaid_count, unpaid_names, _, _ = get_due_status(str(row['start_date']), t_id)
+            if unpaid_count > 0:
+                defaulters.append({
+                    "id": t_id, "الاسم": row['name'], "البطاقة": row['cin'], "العنوان": row['address'],
+                    "عدد أشهر التأخير": unpaid_count, "المبلغ المتأخر": unpaid_count * row['rent_price'],
+                    "الأشهر المتأخرة": "، ".join(unpaid_names)
+                })
+        if defaulters:
+            st.dataframe(pd.DataFrame(defaulters).drop(columns=["id"]), width='stretch')
+        else:
+            st.success("لا توجد متقاعسين.")
+
+
+# --- الواجهة 5: البحث والتصفية ---
+if t5 is not None:
+    with t5:
+        st.subheader("البحث عن مكتري وعرض المرفقات")
+        search_q = st.text_input("أدخل اسم المكتري للبحث:")
+        if search_q:
+            df_search = run_query("SELECT * FROM tenants WHERE name ILIKE %s", (f"%{search_q}%",))
+            if not df_search.empty:
+                t_data = df_search.iloc[0]
+                st.write(f"**الاسم:** {t_data['name']} | **العنوان:** {t_data['address']} | **الهاتف:** {t_data.get('phone', 'غير متوفر')}")
+            else:
+                st.warning("لم يتم العثور على مكتري بهذا الاسم.")
+
+
+# --- الواجهة 6: تصحيح الأخطاء ---
+if t6 is not None:
+    with t6:
+        st.subheader("إلغاء عملية أداء مسجلة بالخطأ")
+        df_recent = run_query("SELECT id AS \"رقم العملية\", tenant_name AS \"اسم المكتري\", amount AS \"المبلغ\", payment_date AS \"تاريخ الأداء\" FROM payments ORDER BY id DESC LIMIT 30")
+        if not df_recent.empty:
+            st.dataframe(df_recent, width='stretch')
+            pid = st.number_input("أدخل رقم العملية المراد حذفها:", min_value=0, step=1, value=0)
+            if st.button("🗑️ حذف العملية"):
+                if pid > 0:
+                    c.execute("DELETE FROM payments WHERE id = %s", (int(pid),))
+                    st.success("تم الحذف بنجاح!")
+                    st.rerun()
+
+
+# --- الواجهة 7: إدارة المكترين ---
+if t7 is not None:
+    with t7:
+        st.subheader("إدارة وتعديل المكترين")
+        tenants_edit_df = run_query("SELECT id, name FROM tenants")
+        if not tenants_edit_df.empty:
+            edit_dict = dict(zip(tenants_edit_df.name, tenants_edit_df.id))
+            selected_edit_tenant = st.selectbox("اختر المكتري للتعديل:", options=list(edit_dict.keys()))
+            t_edit_id = int(edit_dict[selected_edit_tenant])
+            
             c.execute("SELECT phone, shop_category, rent_price, start_date, address FROM tenants WHERE id = %s", (t_edit_id,))
             res_tenant = c.fetchone()
-            current_phone = res_tenant[0] if res_tenant else ""
-            current_category = res_tenant[1] if res_tenant and res_tenant[1] else "محلات صنف 1"
-            current_rent = float(res_tenant[2]) if res_tenant and res_tenant[2] is not None else 0.0
-            current_start_date_str = res_tenant[3] if res_tenant and res_tenant[3] else datetime.today().strftime("%Y-%m-%d")
-            current_address = res_tenant[4] if res_tenant and res_tenant[4] else ""
-            
-            try:
-                parsed_start_date = datetime.strptime(str(current_start_date_str), "%Y-%m-%d").date()
-            except:
-                parsed_start_date = datetime.today().date()
-            
-            cat_index = category_options.index(current_category) if current_category in category_options else 3
-            
-            with st.form("edit_tenant_form"):
-                new_address = st.text_input("تحديث عنوان أو رقم المحل:", value=current_address)
-                new_phone = st.text_input("تحديث رقم الهاتف:", value=current_phone if current_phone else "")
-                new_category = st.selectbox("تحديث صنف المحل:", options=category_options, index=cat_index)
-                new_rent = st.number_input("تحديث ثمن الكراء الشهري (درهم):", value=current_rent, min_value=0.0, step=100.0)
-                new_start_date = st.date_input("تحديث تاريخ بداية الكراء:", value=parsed_start_date)
-                
-                st.markdown("**إضافة أو تحديث المرفقات:**")
-                new_id_card = st.file_uploader("رفع/تحديث نسخة البطاقة", type=["pdf", "png", "jpg", "jpeg"], key="edit_id")
-                new_contract = st.file_uploader("رفع/تحديث نسخة العقد", type=["pdf", "png", "jpg", "jpeg"], key="edit_contract")
-                new_cond = st.file_uploader("رفع/تحديث كناش التحملات", type=["pdf", "png", "jpg", "jpeg"], key="edit_cond")
-                
-                if st.form_submit_button("حفظ التعديلات"):
-                    c.execute(
-                        "UPDATE tenants SET address = %s, phone = %s, shop_category = %s, rent_price = %s, start_date = %s WHERE id = %s",
-                        (new_address, new_phone, new_category, new_rent, str(new_start_date), t_edit_id)
-                    )
-                    if new_id_card:
-                        id_bytes, id_name = get_file_data(new_id_card)
-                        c.execute("UPDATE tenants SET id_card_file = %s, id_card_filename = %s WHERE id = %s", (id_bytes, id_name, t_edit_id))
-                    if new_contract:
-                        cont_bytes, cont_name = get_file_data(new_contract)
-                        c.execute("UPDATE tenants SET contract_file = %s, contract_filename = %s WHERE id = %s", (cont_bytes, cont_name, t_edit_id))
-                    if new_cond:
-                        cond_bytes, cond_name = get_file_data(new_cond)
-                        c.execute("UPDATE tenants SET conditions_file = %s, conditions_filename = %s WHERE id = %s", (cond_bytes, cond_name, t_edit_id))
-                    st.success("تم تحديث بيانات المكتري والعنوان بنجاح!")
-                    st.rerun()
-
-        with colB:
-            st.markdown("#### ❌ حذف فردي")
-            confirm_delete = st.text_input("للتأكيد، اكتب كلمة 'حذف' في الخانة أدناه:", key="single_del_input")
-            if st.button("🚨 حذف المكتري المحدد"):
-                if confirm_delete == "حذف":
-                    c.execute("DELETE FROM payments WHERE tenant_id = %s", (t_edit_id,))
-                    c.execute("DELETE FROM tenants WHERE id = %s", (t_edit_id,))
-                    st.success("تم حذف المكتري بنجاح!")
-                    st.rerun()
-                else:
-                    st.warning("يجب كتابة كلمة 'حذف' لتأكيد العملية.")
+            if res_tenant:
+                with st.form("edit_form"):
+                    new_address = st.text_input("تحديث العنوان:", value=res_tenant[4] if res_tenant[4] else "")
+                    new_phone = st.text_input("تحديث الهاتف:", value=res_tenant[0] if res_tenant[0] else "")
+                    new_rent = st.number_input("تحديث ثمن الكراء:", value=float(res_tenant[2]) if res_tenant[2] else 0.0)
                     
-        # --- قسم الحذف الجماعي ---
-        st.markdown("---")
-        st.markdown("### 🚨 الحذف الجماعي (حذف عدة مكترين دفعة واحدة)")
-        st.warning("انتبه: سيتم حذف جميع المكترين الذين ستحددهم أدناه مع سجلات أدائهم المالية نهائياً.")
-        
-        tenants_to_delete = st.multiselect("اختر المكترين المراد حذفهم دفعة واحدة (يمكنك اختيار الكثير):", options=list(edit_dict.keys()), key="bulk_delete_select")
-        
-        if tenants_to_delete:
-            st.error(f"⚠️ لقد قمت باختيار {len(tenants_to_delete)} مكتري للحذف.")
-            confirm_bulk_delete = st.text_input("للتأكيد النهائي، اكتب كلمة 'تأكيد' أدناه:", key="bulk_confirm")
-            
-            if st.button("🗑️ تنفيذ الحذف الجماعي"):
-                if confirm_bulk_delete == "تأكيد":
-                    for t_name in tenants_to_delete:
-                        tid = int(edit_dict[t_name])
-                        c.execute("DELETE FROM payments WHERE tenant_id = %s", (tid,))
-                        c.execute("DELETE FROM tenants WHERE id = %s", (tid,))
-                        
-                    st.success(f"تم حذف {len(tenants_to_delete)} مكتري بنجاح!")
-                    st.rerun()
-                else:
-                    st.warning("يجب كتابة كلمة 'تأكيد' لتنفيذ الحذف الجماعي.")
-    else:
-        st.info("لا توجد مكترون ضمن هذا الصنف المحدد.")
+                    if st.form_submit_button("حفظ التعديلات"):
+                        c.execute("UPDATE tenants SET address = %s, phone = %s, rent_price = %s WHERE id = %s", (new_address, new_phone, new_rent, t_edit_id))
+                        st.success("تم التعديل بنجاح!")
+                        st.rerun()
 
-# الواجهة 8: النسخ الاحتياطي وتصدير البيانات
-with tab8:
-    st.subheader("💾 النسخ الاحتياطي وحفظ البيانات في الحاسوب")
-    st.write("يمكنك في أي وقت تحميل نسخ شاملة بصيغة Excel لجميع بيانات المكترين والعمليات المالية للاحتفاظ بها في حاسوبك.")
-    
-    col_b1, col_b2 = st.columns(2)
-    
-    with col_b1:
-        st.markdown("#### 👥 نسخة احتياطية لجميع المكترين")
-        df_all_tenants = pd.read_sql_query("""
-            SELECT name AS "الاسم الكامل", 
-                   cin AS "رقم البطاقة الوطنية", 
-                   address AS "عنوان المحل", 
-                   shop_category AS "صنف المحل", 
-                   contract_id AS "رقم العقد", 
-                   start_date AS "تاريخ البداية", 
-                   rent_price AS "ثمن الكراء", 
-                   phone AS "رقم الهاتف" 
-            FROM tenants
-        """, conn)
-        if not df_all_tenants.empty:
-            output_t = io.BytesIO()
-            with pd.ExcelWriter(output_t, engine='xlsxwriter') as writer:
-                df_all_tenants.to_excel(writer, index=False, sheet_name='المكترون')
-            st.download_button(label="📥 تحميل ملف المكترين (Excel)", data=output_t.getvalue(), file_name=f"نسخة_المكترين_{datetime.today().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.info("لا توجد بيانات مكترين حالياً.")
-            
-    with col_b2:
-        st.markdown("#### 💰 نسخة احتياطية لكافة الأداءات المالية")
-        df_all_payments = pd.read_sql_query("""
-            SELECT tenant_name AS "اسم المكتري", 
-                   months_paid AS "عدد الأشهر", 
-                   paid_months_names AS "الأشهر المؤداة", 
-                   amount AS "المبلغ المدفوع", 
-                   payment_date AS "تاريخ الأداء", 
-                   employee AS "الموظف" 
-            FROM payments
-        """, conn)
-        if not df_all_payments.empty:
-            output_p = io.BytesIO()
-            with pd.ExcelWriter(output_p, engine='xlsxwriter') as writer:
-                df_all_payments.to_excel(writer, index=False, sheet_name='الأداءات')
-            st.download_button(label="📥 تحميل ملف الأداءات (Excel)", data=output_p.getvalue(), file_name=f"نسخة_الأداءات_{datetime.today().strftime('%Y-%m-%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        else:
-            st.info("لا توجد عمليات أداء مسجلة حتى الآن.")
+
+# --- الواجهة 8: النسخ الاحتياطي ---
+if t8 is not None:
+    with t8:
+        st.subheader("💾 النسخ الاحتياطي وتصدير البيانات")
+        df_all = run_query("SELECT name AS \"الاسم\", cin AS \"البطاقة\", address AS \"العنوان\", rent_price AS \"الثمن\" FROM tenants")
+        if not df_all.empty:
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df_all.to_excel(writer, index=False, sheet_name='المكترون')
+            st.download_button("📥 تحميل نسخة المكترين Excel", data=output.getvalue(), file_name="نسخه_المكترين.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
