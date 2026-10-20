@@ -454,58 +454,99 @@ if t4 is not None:
                                 st.success("تم الرفع!"); st.rerun()
         else:
             st.success("لا توجد متقاعسين.")
-
 # --- الواجهة 5: البحث والتصفية (النسخة الجديدة الشاملة) ---
 if t5 is not None:
     with t5:
-        st.subheader("البحث عن مكتري وعرض التفاصيل والمرفقات")
-        search_q = st.text_input("أدخل اسم المكتري للبحث (جزء من الاسم يكفي):")
+        st.subheader("البحث عن مكتري وعرض التفاصيل، الديون، والمرفقات")
         
-        if search_q:
-            # البحث عن جميع المكترين الذين يطابقون الاسم
-            df_search = run_query("SELECT * FROM tenants WHERE name ILIKE %s", (f"%{search_q}%",))
+        # جلب جميع الأسماء لعمل قائمة بحث ذكية (تعمل تلقائياً عند الكتابة)
+        all_tenants_df = run_query("SELECT id, name, cin FROM tenants")
+        
+        if not all_tenants_df.empty:
+            # تجهيز الخيارات بحيث تظهر التفاصيل للتفريق بين الأسماء المتشابهة
+            options = [""] + [f"{row['name']} - (بطاقة: {row['cin'] if row['cin'] else 'غير متوفر'}) - [ID: {row['id']}]" for _, row in all_tenants_df.iterrows()]
             
-            if not df_search.empty:
-                st.success(f"✅ تم العثور على {len(df_search)} نتيجة:")
+            selected_option = st.selectbox("🔍 ابدأ بكتابة اسم المكتري (ستظهر النتائج فوراً دون ضغط أي زر):", options=options)
+            
+            if selected_option:
+                # استخراج الـ ID من الخيار المحدد للبحث الدقيق
+                t_id = int(selected_option.split("[ID: ")[1].replace("]", ""))
                 
-                # عرض كل نتيجة في بطاقة مستقلة قابلة للطي
-                for index, row in df_search.iterrows():
-                    with st.expander(f"👤 {row['name']} - (صنف: {row.get('shop_category', 'غير محدد')})"):
+                df_search = run_query("SELECT * FROM tenants WHERE id = %s", (t_id,))
+                
+                if not df_search.empty:
+                    row = df_search.iloc[0]
+                    
+                    # 1. البيانات الشخصية والعقد
+                    st.success("✅ تم جلب بيانات المكتري بنجاح:")
+                    with st.expander(f"👤 البيانات الأساسية لـ: {row['name']}", expanded=True):
                         col1, col2 = st.columns(2)
-                        
                         with col1:
                             st.write(f"**الاسم الكامل:** {row['name']}")
                             st.write(f"**رقم البطاقة (CIN):** {row.get('cin', 'غير متوفر')}")
                             st.write(f"**رقم الهاتف:** {row.get('phone', 'غير متوفر')}")
                             st.write(f"**العنوان / المحل:** {row.get('address', 'غير متوفر')}")
-                        
+                            st.write(f"**الصنف:** {row.get('shop_category', 'غير محدد')}")
                         with col2:
                             st.write(f"**تاريخ بداية الكراء:** {row.get('start_date', 'غير متوفر')}")
                             st.write(f"**ثمن الكراء الشهري:** {row.get('rent_price', 0)} درهم")
                             st.write(f"**رقم العقد:** {row.get('contract_id', 'غير متوفر')}")
-                        
-                        # المرفقات
-                        st.markdown("---")
-                        st.markdown("**📁 المرفقات المسجلة:**")
-                        
-                        attachments = []
-                        if pd.notna(row.get('id_card_file')) and row.get('id_card_file'):
-                            attachments.append((row.get('id_card_filename', 'البطاقة.pdf'), row['id_card_file']))
-                        if pd.notna(row.get('contract_file')) and row.get('contract_file'):
-                            attachments.append((row.get('contract_filename', 'العقد.pdf'), row['contract_file']))
-                        if pd.notna(row.get('conditions_file')) and row.get('conditions_file'):
-                            attachments.append((row.get('conditions_filename', 'الكناش.pdf'), row['conditions_file']))
-                            
-                        if attachments:
-                            cols = st.columns(len(attachments))
-                            for i, (fname, fbytes) in enumerate(attachments):
-                                with cols[i]:
-                                    st.download_button(label=f"📥 {fname}", data=fbytes, file_name=fname, key=f"dl_{row['id']}_{i}")
+                    
+                    # 2. الوضعية المالية (الأداءات والديون)
+                    st.markdown("### 💰 الوضعية المالية (الأداءات والديون)")
+                    u_cnt, u_nms, _, p_months = get_due_status(str(row['start_date']), t_id)
+                    
+                    c_stat1, c_stat2 = st.columns(2)
+                    with c_stat1:
+                        st.info(f"**إجمالي الأشهر المؤداة:** {p_months} أشهر")
+                        # جلب تاريخ الأداءات ووصولات الدفع الخاصة بهذا المكتري فقط
+                        payments_df = run_query("SELECT amount, payment_date, paid_months_names, receipt_filename, receipt_file FROM payments WHERE tenant_id = %s ORDER BY id DESC", (t_id,))
+                        if not payments_df.empty:
+                            st.write("**تاريخ الأداءات ووصولات الدفع:**")
+                            for p_idx, p_row in payments_df.iterrows():
+                                with st.expander(f"📅 دفعة بتاريخ {p_row['payment_date']} | مبلغ {p_row['amount']} درهم"):
+                                    st.write(f"**الأشهر التي تم أداؤها:** {p_row['paid_months_names']}")
+                                    if pd.notna(p_row.get('receipt_file')) and p_row.get('receipt_file'):
+                                        st.download_button(label=f"📥 تحميل وصل الأداء ({p_row.get('receipt_filename', 'وصل.pdf')})", data=p_row['receipt_file'], file_name=p_row.get('receipt_filename', 'وصل.pdf'), key=f"rec_{t_id}_{p_idx}")
+                                    else:
+                                        st.warning("لا يوجد وصل مرفق لهذه العملية.")
                         else:
-                            st.info("لا توجد مرفقات مسجلة لهذا المكتري في النظام.")
-            else:
-                st.warning("لم يتم العثور على أي مكتري بهذا الاسم. تأكد من الحروف (مثل: امين / أمين).")
+                            st.write("لم يتم تسجيل أي أداءات حتى الآن.")
 
+                    with c_stat2:
+                        if u_cnt > 0:
+                            st.error(f"**إجمالي الأشهر المتأخرة (غير المؤداة):** {u_cnt} أشهر")
+                            st.write(f"**الديون المتراكمة:** {u_cnt * row['rent_price']} درهم")
+                            st.write(f"**تفصيل الأشهر غير المؤداة:** {'، '.join(u_nms)}")
+                        else:
+                            st.success("✅ المكتري في وضعية سليمة، لا توجد ديون متأخرة!")
+
+                    # 3. الوثائق والمرفقات الأساسية
+                    st.markdown("### 📁 الوثائق والمرفقات الأساسية")
+                    attachments = []
+                    if pd.notna(row.get('id_card_file')) and row.get('id_card_file'):
+                        attachments.append((row.get('id_card_filename', 'البطاقة.pdf'), row['id_card_file']))
+                    if pd.notna(row.get('contract_file')) and row.get('contract_file'):
+                        attachments.append((row.get('contract_filename', 'العقد.pdf'), row['contract_file']))
+                    if pd.notna(row.get('conditions_file')) and row.get('conditions_file'):
+                        attachments.append((row.get('conditions_filename', 'الكناش.pdf'), row['conditions_file']))
+                    if pd.notna(row.get('notice_1_file')) and row.get('notice_1_file'):
+                        attachments.append((row.get('notice_1_filename', 'الإنذار_الأول.pdf'), row['notice_1_file']))
+                    if pd.notna(row.get('notice_2_file')) and row.get('notice_2_file'):
+                        attachments.append((row.get('notice_2_filename', 'الإنذار_الثاني.pdf'), row['notice_2_file']))
+                    if pd.notna(row.get('cancellation_file')) and row.get('cancellation_file'):
+                        attachments.append((row.get('cancellation_filename', 'طلب_الإفراغ.pdf'), row['cancellation_file']))
+                        
+                    if attachments:
+                        cols = st.columns(len(attachments))
+                        for i, (fname, fbytes) in enumerate(attachments):
+                            with cols[i]:
+                                st.download_button(label=f"📥 {fname}", data=fbytes, file_name=fname, key=f"dl_main_{t_id}_{i}")
+                    else:
+                        st.info("لا توجد وثائق أساسية مسجلة لهذا المكتري.")
+        else:
+            st.info("لا يوجد أي مكتري مسجل في النظام بعد.")
+            
 # --- الواجهة 6: تصحيح الأخطاء ---
 if t6 is not None:
     with t6:
