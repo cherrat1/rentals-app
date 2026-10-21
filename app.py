@@ -276,13 +276,12 @@ if t2 is not None:
                 employee_name = c2.text_input("اسم الموظف المستخلص")
                 
                 st.markdown("---")
-                # إضافة خيار لاختيار طريقة رفع الوصولات
                 receipt_option = st.radio("كيف تريد إرفاق الوصولات؟", 
-                                          options=["📄 وصل واحد يجمع كل الأشهر المحددة", "📑 وصل منفصل لكل شهر على حدة"], 
+                                          options=["📄 وصل واحد يجمع كل الأشهر المحددة", "📑 وصولات منفصلة (رفع عدة ملفات دفعة واحدة)"], 
                                           horizontal=True)
                 
                 single_receipt_file = None
-                receipt_files = {}
+                uploaded_multiple_files = []
                 
                 if months_paid > 0:
                     if receipt_option == "📄 وصل واحد يجمع كل الأشهر المحددة":
@@ -290,15 +289,15 @@ if t2 is not None:
                         st.info(f"**المبلغ الإجمالي:** {calculated_amount} درهم")
                         single_receipt_file = st.file_uploader("إرفاق الوصل الإجمالي", type=["pdf", "png", "jpg", "jpeg"])
                     else:
-                        for m in selected_months:
-                            receipt_files[m] = st.file_uploader(f"وصل أداء خاص بشهر: {m} ({current_tenant_rent} درهم)", type=["pdf", "png", "jpg", "jpeg"], key=f"rec_{m}")
+                        st.info(f"اختر {months_paid} ملفات. (يمكنك تحديدها كلها دفعة واحدة بالماوس أو بـ Ctrl). سيتم ربط كل ملف بشهر تلقائياً.")
+                        # الخاصية accept_multiple_files=True هي التي تسمح برفع عدة ملفات دفعة واحدة
+                        uploaded_multiple_files = st.file_uploader("إرفاق الوصولات (رفع متعدد)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
                 
                 if st.form_submit_button("تأكيد وتسجيل الأداء"):
                     if months_paid == 0:
                         st.warning("المرجو اختيار شهر واحد على الأقل.")
                     else:
                         if receipt_option == "📄 وصل واحد يجمع كل الأشهر المحددة":
-                            # تسجيل كعملية واحدة مجمعة
                             r_bytes, r_name = get_file_data(single_receipt_file)
                             paid_months_str = "، ".join(selected_months)
                             calculated_amount = float(current_tenant_rent * months_paid)
@@ -309,20 +308,23 @@ if t2 is not None:
                             st.success(f"✅ تم تسجيل أداء إجمالي بقيمة {calculated_amount} درهم عن {months_paid} أشهر بنجاح!")
                         
                         else:
-                            # تسجيل كعمليات منفصلة
-                            for m in selected_months:
-                                r_file = receipt_files[m]
+                            # حالة الرفع المتعدد
+                            if len(uploaded_multiple_files) > 0 and len(uploaded_multiple_files) != months_paid:
+                                st.warning(f"تنبيه: لقد اخترت {months_paid} أشهر، ولكنك رفعت {len(uploaded_multiple_files)} ملفات. سيتم ربط الملفات المتاحة فقط.")
+                            
+                            for i, m in enumerate(selected_months):
+                                r_file = uploaded_multiple_files[i] if i < len(uploaded_multiple_files) else None
                                 r_bytes, r_name = get_file_data(r_file)
                                 
                                 c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                                           (t_id, selected_tenant, 1, current_tenant_rent, str(payment_date), employee_name, m, r_bytes, r_name))
                                 
-                            st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح، وتم ربط كل شهر بوصله الخاص!")
+                            st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح، وتم توزيع الملفات المرفوعة على الأشهر!")
                         
                         st.rerun()
         else:
             st.warning("لا يوجد مكترين مسجلين.")
-
+            
 # --- الواجهة 3: تقرير البنك ---
 if t3 is not None:
     with t3:
