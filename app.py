@@ -323,33 +323,59 @@ if t2 is not None:
                             st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح!")
                         st.rerun()
 
-# --- الواجهة 3: تقرير البنك (الترويسة الرسمية وسطر المجموع والتاريخ) ---
+# --- الواجهة 3: تقرير البنك (نظام الإغلاق التلقائي والأرشيف) ---
 if t3 is not None:
     with t3:
-        st.subheader("تقرير التوريد للبنك (مُجمّع ومحدد للطباعة في صفحة واحدة)")
-        d1, d2 = st.columns(2)
-        start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1), key="b_d1")
-        end_d = d2.date_input("إلى تاريخ", value=datetime.today(), key="b_d2")
+        st.subheader("🏦 تقرير التوريد للبنك (التتبع والتحيين التلقائي)")
         
-        query = """
-        SELECT 
-            p.tenant_name AS "اسم المكتري", 
-            COALESCE(NULLIF(MAX(t.contract_id), ''), 'غير متوفر') AS "رقم العقد",
-            COALESCE(NULLIF(MAX(t.shop_category), ''), 'غير محدد') AS "الصنف",
-            COALESCE(NULLIF(MAX(t.address), ''), 'غير متوفر') AS "رقم المحل",
-            SUM(p.months_paid) AS "عدد الأشهر", 
-            STRING_AGG(p.paid_months_names, '، ') AS "الأشهر المؤداة", 
-            SUM(p.amount) AS "المبلغ الإجمالي (درهم)"
-        FROM payments p
-        LEFT JOIN tenants t ON (p.tenant_id = t.id OR p.tenant_name = t.name)
-        WHERE p.payment_date BETWEEN %s AND %s
-        GROUP BY p.tenant_name
-        """
+        # إضافة عامود حالة الإرسال للبنك تلقائياً إن لم يكن موجوداً
+        try:
+            c.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS is_sent_to_bank BOOLEAN DEFAULT FALSE;")
+        except:
+            pass
+            
+        report_mode = st.radio("اختر نوع التقرير:", 
+                              ["🆕 العمليات الجديدة (غير المرسلة للبنك)", "📜 أرشيف التقارير السابقة (حسب التاريخ)"], 
+                              horizontal=True)
         
-        df = run_query(query, (str(start_d), str(end_d)))
+        if report_mode == "🆕 العمليات الجديدة (غير المرسلة للبنك)":
+            query = """
+            SELECT 
+                p.tenant_name AS "اسم المكتري", 
+                COALESCE(NULLIF(MAX(t.contract_id), ''), 'غير متوفر') AS "رقم العقد",
+                COALESCE(NULLIF(MAX(t.shop_category), ''), 'غير محدد') AS "الصنف",
+                COALESCE(NULLIF(MAX(t.address), ''), 'غير متوفر') AS "رقم المحل",
+                SUM(p.months_paid) AS "عدد الأشهر", 
+                STRING_AGG(p.paid_months_names, '، ') AS "الأشهر المؤداة", 
+                SUM(p.amount) AS "المبلغ الإجمالي (درهم)"
+            FROM payments p
+            LEFT JOIN tenants t ON (p.tenant_id = t.id OR p.tenant_name = t.name)
+            WHERE COALESCE(p.is_sent_to_bank, FALSE) = FALSE
+            GROUP BY p.tenant_name
+            """
+            df = run_query(query)
+        else:
+            d1, d2 = st.columns(2)
+            start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1), key="b_d1")
+            end_d = d2.date_input("إلى تاريخ", value=datetime.today(), key="b_d2")
+            
+            query = """
+            SELECT 
+                p.tenant_name AS "اسم المكتري", 
+                COALESCE(NULLIF(MAX(t.contract_id), ''), 'غير متوفر') AS "رقم العقد",
+                COALESCE(NULLIF(MAX(t.shop_category), ''), 'غير محدد') AS "الصنف",
+                COALESCE(NULLIF(MAX(t.address), ''), 'غير متوفر') AS "رقم المحل",
+                SUM(p.months_paid) AS "عدد الأشهر", 
+                STRING_AGG(p.paid_months_names, '، ') AS "الأشهر المؤداة", 
+                SUM(p.amount) AS "المبلغ الإجمالي (درهم)"
+            FROM payments p
+            LEFT JOIN tenants t ON (p.tenant_id = t.id OR p.tenant_name = t.name)
+            WHERE p.payment_date BETWEEN %s AND %s
+            GROUP BY p.tenant_name
+            """
+            df = run_query(query, (str(start_d), str(end_d)))
         
         if not df.empty:
-            # تنظيف رقم المحل لإزالة اسم الصنف المكرر
             def clean_shop_num(row):
                 shop_val = str(row["رقم المحل"])
                 cat_val = str(row["الصنف"])
@@ -359,10 +385,9 @@ if t3 is not None:
                 return shop_val
 
             df["رقم المحل"] = df.apply(clean_shop_num, axis=1)
-
             total_sum = df["المبلغ الإجمالي (درهم)"].sum()
             
-            # عرض الجدول المنسق داخل الواجهة
+            # عرض الجدول في الواجهة
             df_display_ui = df.copy()
             total_row = pd.DataFrame([{
                 "اسم المكتري": "المجموع",
@@ -383,104 +408,45 @@ if t3 is not None:
             styled_df = df_display_ui.style.apply(style_total_row, axis=1)
             st.dataframe(styled_df, use_container_width=True)
             
-            st.metric(label="💰 مجموع المبالغ المستخلصة للفترة المحددة", value=f"{total_sum:,.2f} درهم")
+            st.metric(label="💰 مجموع المبالغ المستخلصة لهذا التقرير", value=f"{total_sum:,.2f} درهم")
             
-            # إنشاء ملف Excel بتطبيقات الترويسة بدون أسطر وسطر المجموع المدمج والتاريخ أسفل الجدول
+            # إنشاء ملف Excel الرسمي
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 workbook = writer.book
                 worksheet = workbook.add_worksheet('التقرير')
                 
-                # تفعيل الاتجاه من اليمين إلى اليسار وإعدادات A4 Landscape
                 worksheet.right_to_left()
                 worksheet.set_landscape()
                 worksheet.set_paper(9) # A4
                 worksheet.fit_to_pages(1, 0)
                 worksheet.hide_gridlines(0)
                 
-                # التنسيقات
-                header_right_fmt = workbook.add_format({
-                    'bold': True,
-                    'font_size': 11,
-                    'align': 'right',
-                    'valign': 'vcenter'
-                })
-                
-                title_center_fmt = workbook.add_format({
-                    'bold': True,
-                    'font_size': 16,
-                    'align': 'center',
-                    'valign': 'vcenter',
-                    'font_color': '#1B365D'
-                })
-                
-                table_header_fmt = workbook.add_format({
-                    'border': 1,
-                    'bold': True,
-                    'bg_color': '#366092',
-                    'font_color': '#FFFFFF',
-                    'align': 'center',
-                    'valign': 'vcenter',
-                    'font_size': 12
-                })
-                
-                cell_fmt = workbook.add_format({
-                    'border': 1,
-                    'align': 'center',
-                    'valign': 'vcenter',
-                    'font_size': 11
-                })
-                
-                total_label_fmt = workbook.add_format({
-                    'border': 1,
-                    'bold': True,
-                    'bg_color': '#D4EDDA',
-                    'font_color': '#155724',
-                    'align': 'center',
-                    'valign': 'vcenter',
-                    'font_size': 12
-                })
+                header_right_fmt = workbook.add_format({'bold': True, 'font_size': 11, 'align': 'right', 'valign': 'vcenter'})
+                title_center_fmt = workbook.add_format({'bold': True, 'font_size': 16, 'align': 'center', 'valign': 'vcenter', 'font_color': '#1B365D'})
+                table_header_fmt = workbook.add_format({'border': 1, 'bold': True, 'bg_color': '#366092', 'font_color': '#FFFFFF', 'align': 'center', 'valign': 'vcenter', 'font_size': 12})
+                cell_fmt = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter', 'font_size': 11})
+                total_label_fmt = workbook.add_format({'border': 1, 'bold': True, 'bg_color': '#D4EDDA', 'font_color': '#155724', 'align': 'center', 'valign': 'vcenter', 'font_size': 12})
+                total_amount_fmt = workbook.add_format({'border': 1, 'bold': True, 'bg_color': '#D4EDDA', 'font_color': '#155724', 'align': 'center', 'valign': 'vcenter', 'font_size': 12, 'num_format': '#,##0.00'})
+                date_bottom_fmt = workbook.add_format({'bold': True, 'font_size': 11, 'align': 'left', 'valign': 'vcenter'})
 
-                total_amount_fmt = workbook.add_format({
-                    'border': 1,
-                    'bold': True,
-                    'bg_color': '#D4EDDA',
-                    'font_color': '#155724',
-                    'align': 'center',
-                    'valign': 'vcenter',
-                    'font_size': 12,
-                    'num_format': '#,##0.00'
-                })
-                
-                date_bottom_fmt = workbook.add_format({
-                    'bold': True,
-                    'font_size': 11,
-                    'align': 'left',
-                    'valign': 'vcenter'
-                })
-
-                # 1. الترويسة الرسمية (أعلى اليمين بدون حد أو إطار)
                 worksheet.write(0, 0, "المملكة المغربية", header_right_fmt)
                 worksheet.write(1, 0, "وزارة الداخلية", header_right_fmt)
                 worksheet.write(2, 0, "عمالة بن سليمان", header_right_fmt)
                 worksheet.write(3, 0, "جماعة شراط", header_right_fmt)
                 worksheet.write(4, 0, "مصلحة المداخيل", header_right_fmt)
                 
-                # 2. العنوان الرئيسي في الوسط
                 worksheet.merge_range(1, 1, 3, 5, "منتوج كراء المحلات المهنية و التجارية", title_center_fmt)
                 
-                # ضبط ارتفاع أسطر الترويسة
                 for r in range(5):
                     worksheet.set_row(r, 20)
-                worksheet.set_row(5, 15) # سطر فاصل
+                worksheet.set_row(5, 15)
                 
-                # 3. كتابة رؤوس الجدول في السطر 6
                 header_row = 6
                 worksheet.set_row(header_row, 28)
                 for col_num, col_name in enumerate(df.columns):
                     worksheet.write(header_row, col_num, col_name, table_header_fmt)
                     
-                # 4. كتابة بيانات الجدول
                 data_start_row = 7
                 for row_num in range(len(df)):
                     current_r = data_start_row + row_num
@@ -489,41 +455,42 @@ if t3 is not None:
                         val = df.iloc[row_num, col_num]
                         worksheet.write(current_r, col_num, val, cell_fmt)
                         
-                # 5. سطر المجموع في الأسفل (دمج الخانات من العمود 0 إلى 5 لكلمة "المجموع")
                 total_row_idx = data_start_row + len(df)
                 worksheet.set_row(total_row_idx, 26)
                 worksheet.merge_range(total_row_idx, 0, total_row_idx, 5, "المجموع", total_label_fmt)
                 worksheet.write(total_row_idx, 6, total_sum, total_amount_fmt)
                 
-                # 6. إضافة تاريخ طباعة الجدول أسفل الجدول على اليسار
                 date_row_idx = total_row_idx + 2
                 worksheet.set_row(date_row_idx, 22)
                 today_str = datetime.today().strftime("%Y-%m-%d")
                 worksheet.merge_range(date_row_idx, 4, date_row_idx, 6, f"حرر بشراط في: {today_str}", date_bottom_fmt)
                 
-                # 7. قياسات عرض الأعمدة
-                col_widths = {
-                    "اسم المكتري": 26,
-                    "رقم العقد": 15,
-                    "الصنف": 18,
-                    "رقم المحل": 12,
-                    "عدد الأشهر": 12,
-                    "الأشهر المؤداة": 36,
-                    "المبلغ الإجمالي (درهم)": 22
-                }
-                
+                col_widths = {"اسم المكتري": 26, "رقم العقد": 15, "الصنف": 18, "رقم المحل": 12, "عدد الأشهر": 12, "الأشهر المؤداة": 36, "المبلغ الإجمالي (درهم)": 22}
                 for i, col_name in enumerate(df.columns):
                     w = col_widths.get(col_name, 18)
                     worksheet.set_column(i, i, w)
 
-            st.download_button(
-                "📥 تحميل التقرير كملف Excel (مؤطر ومُنسّق بالترويسة الرسمية)", 
-                data=output.getvalue(), 
-                file_name="تقرير_البنك_مجمع_رسمي.xlsx", 
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                st.download_button(
+                    "📥 تحميل التقرير كملف Excel", 
+                    data=output.getvalue(), 
+                    file_name="تقرير_البنك_مجمع_رسمي.xlsx", 
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            # زر إغلاق التقرير وحفظ العمليات كمرسلة
+            if report_mode == "🆕 العمليات الجديدة (غير المرسلة للبنك)":
+                with col_btn2:
+                    if st.button("🔒 إغلاق هذا التقرير وتأكيد إرساله للبنك"):
+                        c.execute("UPDATE payments SET is_sent_to_bank = TRUE WHERE COALESCE(is_sent_to_bank, FALSE) = FALSE;")
+                        st.success("✅ تم إغلاق التقرير وحفظ كافة العمليات كمرسلة بنجاح! التقرير القادم سيحسب العمليات الجديدة فقط تلقائياً.")
+                        st.rerun()
         else:
-            st.warning("لا توجد أداءات مسجلة في هذه الفترة.")
+            if report_mode == "🆕 العمليات الجديدة (غير المرسلة للبنك)":
+                st.info("✅ لا توجد عمليات جديدة غير مرسلة للبنك حالياً. جميع العمليات تم إغلاقها وإرسالها سابقاً.")
+            else:
+                st.warning("لا توجد أداءات مسجلة في هذه الفترة.")
 
 # --- الواجهة 4: المتقاعسون ---
 if t4 is not None:
