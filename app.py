@@ -323,7 +323,7 @@ if t2 is not None:
                             st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح!")
                         st.rerun()
 
-# --- الواجهة 3: تقرير البنك (مُجمّع ومُنسّق بالترويسة والطباعة) ---
+# --- الواجهة 3: تقرير البنك (الترويسة الرسمية وسطر المجموع والتاريخ) ---
 if t3 is not None:
     with t3:
         st.subheader("تقرير التوريد للبنك (مُجمّع ومحدد للطباعة في صفحة واحدة)")
@@ -361,48 +361,44 @@ if t3 is not None:
             df["رقم المحل"] = df.apply(clean_shop_num, axis=1)
 
             total_sum = df["المبلغ الإجمالي (درهم)"].sum()
-            total_months = df["عدد الأشهر"].sum()
-            
-            df_display = df.copy()
-            total_row = pd.DataFrame([{
-                "اسم المكتري": "📊 المجموع الإجمالي",
-                "رقم العقد": "---",
-                "الصنف": "---",
-                "رقم المحل": "---",
-                "عدد الأشهر": total_months,
-                "الأشهر المؤداة": "---",
-                "المبلغ الإجمالي (درهم)": total_sum
-            }])
-            df_display = pd.concat([df_display, total_row], ignore_index=True)
             
             # عرض الجدول المنسق داخل الواجهة
+            df_display_ui = df.copy()
+            total_row = pd.DataFrame([{
+                "اسم المكتري": "المجموع",
+                "رقم العقد": "",
+                "الصنف": "",
+                "رقم المحل": "",
+                "عدد الأشهر": "",
+                "الأشهر المؤداة": "",
+                "المبلغ الإجمالي (درهم)": total_sum
+            }])
+            df_display_ui = pd.concat([df_display_ui, total_row], ignore_index=True)
+            
             def style_total_row(row):
-                if row["اسم المكتري"] == "📊 المجموع الإجمالي":
+                if row["اسم المكتري"] == "المجموع":
                     return ['background-color: #d4edda; color: #155724; font-weight: bold;'] * len(row)
                 return [''] * len(row)
 
-            styled_df = df_display.style.apply(style_total_row, axis=1)
+            styled_df = df_display_ui.style.apply(style_total_row, axis=1)
             st.dataframe(styled_df, use_container_width=True)
             
             st.metric(label="💰 مجموع المبالغ المستخلصة للفترة المحددة", value=f"{total_sum:,.2f} درهم")
             
-            # إنشاء ملف Excel الرسمي المنسق مع الترويسة والحدود والمسافات
+            # إنشاء ملف Excel بتطبيقات الترويسة بدون أسطر وسطر المجموع المدمج والتاريخ أسفل الجدول
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                # كتابة البيانات بدءاً من السطر 6 لترك مجال للترويسة في الأعلى
-                df_display.to_excel(writer, index=False, sheet_name='التقرير', startrow=5)
-                
                 workbook = writer.book
-                worksheet = writer.sheets['التقرير']
+                worksheet = workbook.add_worksheet('التقرير')
                 
-                # تفعيل الاتجاه من اليمين إلى اليسار
+                # تفعيل الاتجاه من اليمين إلى اليسار وإعدادات A4 Landscape
                 worksheet.right_to_left()
                 worksheet.set_landscape()
                 worksheet.set_paper(9) # A4
                 worksheet.fit_to_pages(1, 0)
                 worksheet.hide_gridlines(0)
                 
-                # تنسيقات الترويسة والعناوين
+                # التنسيقات
                 header_right_fmt = workbook.add_format({
                     'bold': True,
                     'font_size': 11,
@@ -435,7 +431,7 @@ if t3 is not None:
                     'font_size': 11
                 })
                 
-                total_fmt = workbook.add_format({
+                total_label_fmt = workbook.add_format({
                     'border': 1,
                     'bold': True,
                     'bg_color': '#D4EDDA',
@@ -444,39 +440,68 @@ if t3 is not None:
                     'valign': 'vcenter',
                     'font_size': 12
                 })
+
+                total_amount_fmt = workbook.add_format({
+                    'border': 1,
+                    'bold': True,
+                    'bg_color': '#D4EDDA',
+                    'font_color': '#155724',
+                    'align': 'center',
+                    'valign': 'vcenter',
+                    'font_size': 12,
+                    'num_format': '#,##0.00'
+                })
                 
-                # 1. كتابة ترويسة اليمين (في العمود الأول A)
+                date_bottom_fmt = workbook.add_format({
+                    'bold': True,
+                    'font_size': 11,
+                    'align': 'left',
+                    'valign': 'vcenter'
+                })
+
+                # 1. الترويسة الرسمية (أعلى اليمين بدون حد أو إطار)
                 worksheet.write(0, 0, "المملكة المغربية", header_right_fmt)
                 worksheet.write(1, 0, "وزارة الداخلية", header_right_fmt)
                 worksheet.write(2, 0, "عمالة بن سليمان", header_right_fmt)
                 worksheet.write(3, 0, "جماعة شراط", header_right_fmt)
+                worksheet.write(4, 0, "مصلحة المداخيل", header_right_fmt)
                 
-                # 2. كتابة العنوان الرئيسي في الوسط بحجم كبير (دمج الخلايا من B إلى F)
+                # 2. العنوان الرئيسي في الوسط
                 worksheet.merge_range(1, 1, 3, 5, "منتوج كراء المحلات المهنية و التجارية", title_center_fmt)
                 
                 # ضبط ارتفاع أسطر الترويسة
-                for r in range(4):
-                    worksheet.set_row(r, 22)
-                worksheet.set_row(4, 15) # سطر فارغ كفاصل
+                for r in range(5):
+                    worksheet.set_row(r, 20)
+                worksheet.set_row(5, 15) # سطر فاصل
                 
-                # 3. كتابة رؤوس أعمدة الجدول في السطر 5 مع تكبير الارتفاع
-                worksheet.set_row(5, 30)
-                for col_num, col_name in enumerate(df_display.columns):
-                    worksheet.write(5, col_num, col_name, table_header_fmt)
+                # 3. كتابة رؤوس الجدول في السطر 6
+                header_row = 6
+                worksheet.set_row(header_row, 28)
+                for col_num, col_name in enumerate(df.columns):
+                    worksheet.write(header_row, col_num, col_name, table_header_fmt)
                     
-                # 4. كتابة أسطر البيانات مع إعطاء مسافة واسعة في الخانات (ارتفاع السطر 26)
-                start_row = 6
-                for row_num in range(len(df_display)):
-                    current_r = start_row + row_num
-                    worksheet.set_row(current_r, 26) # إضافة ارتفاع مريح للسطر
-                    is_last_row = (row_num == len(df_display) - 1)
-                    fmt = total_fmt if is_last_row else cell_fmt
-                    
-                    for col_num in range(len(df_display.columns)):
-                        val = df_display.iloc[row_num, col_num]
-                        worksheet.write(current_r, col_num, val, fmt)
+                # 4. كتابة بيانات الجدول
+                data_start_row = 7
+                for row_num in range(len(df)):
+                    current_r = data_start_row + row_num
+                    worksheet.set_row(current_r, 24)
+                    for col_num in range(len(df.columns)):
+                        val = df.iloc[row_num, col_num]
+                        worksheet.write(current_r, col_num, val, cell_fmt)
                         
-                # 5. تكبير عرض الأعمدة لتشمل الورقة بشكل متناسق ومريح
+                # 5. سطر المجموع في الأسفل (دمج الخانات من العمود 0 إلى 5 لكلمة "المجموع")
+                total_row_idx = data_start_row + len(df)
+                worksheet.set_row(total_row_idx, 26)
+                worksheet.merge_range(total_row_idx, 0, total_row_idx, 5, "المجموع", total_label_fmt)
+                worksheet.write(total_row_idx, 6, total_sum, total_amount_fmt)
+                
+                # 6. إضافة تاريخ طباعة الجدول أسفل الجدول على اليسار
+                date_row_idx = total_row_idx + 2
+                worksheet.set_row(date_row_idx, 22)
+                today_str = datetime.today().strftime("%Y-%m-%d")
+                worksheet.merge_range(date_row_idx, 4, date_row_idx, 6, f"حرر بشراط في: {today_str}", date_bottom_fmt)
+                
+                # 7. قياسات عرض الأعمدة
                 col_widths = {
                     "اسم المكتري": 26,
                     "رقم العقد": 15,
@@ -487,10 +512,10 @@ if t3 is not None:
                     "المبلغ الإجمالي (درهم)": 22
                 }
                 
-                for i, col_name in enumerate(df_display.columns):
+                for i, col_name in enumerate(df.columns):
                     w = col_widths.get(col_name, 18)
                     worksheet.set_column(i, i, w)
-            
+
             st.download_button(
                 "📥 تحميل التقرير كملف Excel (مؤطر ومُنسّق بالترويسة الرسمية)", 
                 data=output.getvalue(), 
