@@ -331,7 +331,6 @@ if t3 is not None:
         start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1), key="b_d1")
         end_d = d2.date_input("إلى تاريخ", value=datetime.today(), key="b_d2")
         
-        # استعلام مطور يضمن جلب الصنف ورقم المحل ومعالجة النصوص الفارغة
         query = """
         SELECT 
             p.tenant_name AS "اسم المكتري", 
@@ -350,6 +349,17 @@ if t3 is not None:
         df = run_query(query, (str(start_d), str(end_d)))
         
         if not df.empty:
+            # تنظيف رقم المحل لإزالة اسم الصنف المكرر منه بذكاء
+            def clean_shop_num(row):
+                shop_val = str(row["رقم المحل"])
+                cat_val = str(row["الصنف"])
+                if cat_val != "غير محدد" and cat_val in shop_val:
+                    cleaned = shop_val.replace(cat_val, "").strip(" -_:")
+                    return cleaned if cleaned else shop_val
+                return shop_val
+
+            df["رقم المحل"] = df.apply(clean_shop_num, axis=1)
+
             total_sum = df["المبلغ الإجمالي (درهم)"].sum()
             total_months = df["عدد الأشهر"].sum()
             
@@ -426,7 +436,7 @@ if t3 is not None:
                     "اسم المكتري": 22,
                     "رقم العقد": 12,
                     "الصنف": 15,
-                    "رقم المحل": 12,
+                    "رقم المحل": 10,
                     "عدد الأشهر": 10,
                     "الأشهر المؤداة": 32,
                     "المبلغ الإجمالي (درهم)": 18
