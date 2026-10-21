@@ -328,36 +328,41 @@ if t2 is not None:
 # --- الواجهة 3: تقرير البنك ---
 if t3 is not None:
     with t3:
-        st.subheader("تقرير التوريد للبنك (مُجمّع مع إطار وحدود للجدول)")
+        st.subheader("تقرير التوريد للبنك (مُجمّع ومحدد للطباعة في صفحة واحدة)")
         d1, d2 = st.columns(2)
         start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1), key="b_d1")
         end_d = d2.date_input("إلى تاريخ", value=datetime.today(), key="b_d2")
         
+        # استعلام يدمج البيانات ويجلب رقم العقد والصنف ورقم المحل
         query = """
         SELECT 
             p.tenant_name AS "اسم المكتري", 
             COALESCE(t.contract_id, 'غير متوفر') AS "رقم العقد",
-            SUM(p.months_paid) AS "إجمالي عدد الأشهر", 
+            COALESCE(t.shop_category, 'غير محدد') AS "الصنف",
+            COALESCE(t.address, 'غير متوفر') AS "رقم المحل",
+            SUM(p.months_paid) AS "عدد الأشهر", 
             STRING_AGG(p.paid_months_names, '، ') AS "الأشهر المؤداة", 
             SUM(p.amount) AS "المبلغ الإجمالي (درهم)"
         FROM payments p
         LEFT JOIN tenants t ON p.tenant_id = t.id
         WHERE p.payment_date BETWEEN %s AND %s
-        GROUP BY p.tenant_id, p.tenant_name, t.contract_id
+        GROUP BY p.tenant_id, p.tenant_name, t.contract_id, t.shop_category, t.address
         """
         
         df = run_query(query, (str(start_d), str(end_d)))
         
         if not df.empty:
             total_sum = df["المبلغ الإجمالي (درهم)"].sum()
-            total_months = df["إجمالي عدد الأشهر"].sum()
+            total_months = df["عدد الأشهر"].sum()
             
             # إضافة سطر المجموع الإجمالي لأسفل الجدول
             df_display = df.copy()
             total_row = pd.DataFrame([{
                 "اسم المكتري": "📊 المجموع الإجمالي",
                 "رقم العقد": "---",
-                "إجمالي عدد الأشهر": total_months,
+                "الصنف": "---",
+                "رقم المحل": "---",
+                "عدد الأشهر": total_months,
                 "الأشهر المؤداة": "---",
                 "المبلغ الإجمالي (درهم)": total_sum
             }])
@@ -374,7 +379,7 @@ if t3 is not None:
             
             st.metric(label="💰 مجموع المبالغ المستخلصة للفترة المحددة", value=f"{total_sum:,.2f} درهم")
             
-            # إنشاء ملف Excel بتنسيق الحدود الرسمية (Borders)
+            # إنشاء ملف Excel مضبوط للطباعة في صفحة واحدة
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df_display.to_excel(writer, index=False, sheet_name='التقرير')
@@ -382,10 +387,14 @@ if t3 is not None:
                 workbook = writer.book
                 worksheet = writer.sheets['التقرير']
                 
-                # تفعيل إظهار خطوط الشبكة تلقائياً
+                # إعدادات الطباعة: وضع أفقي (Landscape) وعرض في صفحة واحدة (A4)
+                worksheet.set_landscape()
+                worksheet.set_paper(9)  # A4
+                worksheet.fit_to_pages(1, 0)  # ضبط عرض الجدول ليناسب صفحة واحدة تماماً
+                
                 worksheet.hide_gridlines(0)
                 
-                # تعيين تنسيقات الحدود والخطوط
+                # التنسيقات
                 header_fmt = workbook.add_format({
                     'border': 1,
                     'bold': True,
@@ -397,7 +406,7 @@ if t3 is not None:
                 
                 cell_fmt = workbook.add_format({
                     'border': 1,
-                    'align': 'right',
+                    'align': 'center',
                     'valign': 'vcenter'
                 })
                 
@@ -406,15 +415,15 @@ if t3 is not None:
                     'bold': True,
                     'bg_color': '#D4EDDA',
                     'font_color': '#155724',
-                    'align': 'right',
+                    'align': 'center',
                     'valign': 'vcenter'
                 })
                 
-                # تطبيق إطار الحدود على رؤوس الأعمدة
+                # كتابة رؤوس الأعمدة
                 for col_num, col_name in enumerate(df_display.columns):
                     worksheet.write(0, col_num, col_name, header_fmt)
                     
-                # تطبيق إطار الحدود على جميع البيانات والأسطر
+                # كتابة البيانات والأطر
                 for row_num in range(len(df_display)):
                     is_last_row = (row_num == len(df_display) - 1)
                     fmt = total_fmt if is_last_row else cell_fmt
@@ -422,13 +431,23 @@ if t3 is not None:
                         val = df_display.iloc[row_num, col_num]
                         worksheet.write(row_num + 1, col_num, val, fmt)
                         
-                # تعديل عرض الأعمدة تلقائياً لتستوعب كافة النصوص بدون قص
-                for i, col in enumerate(df_display.columns):
-                    max_len = max(df_display[col].astype(str).map(len).max(), len(col)) + 5
-                    worksheet.set_column(i, i, max_len)
+                # قياسات دقيقة ومخصصة لعرض الأعمدة لتناسب الطباعة العريضة
+                col_widths = {
+                    "اسم المكتري": 22,
+                    "رقم العقد": 12,
+                    "الصنف": 15,
+                    "رقم المحل": 12,
+                    "عدد الأشهر": 10,
+                    "الأشهر المؤداة": 32,
+                    "المبلغ الإجمالي (درهم)": 18
+                }
+                
+                for i, col_name in enumerate(df_display.columns):
+                    w = col_widths.get(col_name, 15)
+                    worksheet.set_column(i, i, w)
             
             st.download_button(
-                "📥 تحميل التقرير كملف Excel (مؤطر ومحسّن)", 
+                "📥 تحميل التقرير كملف Excel (مؤطر للطباعة في صفحة واحدة)", 
                 data=output.getvalue(), 
                 file_name="تقرير_البنك_مجمع.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
