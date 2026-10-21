@@ -328,7 +328,7 @@ if t2 is not None:
 # --- الواجهة 3: تقرير البنك ---
 if t3 is not None:
     with t3:
-        st.subheader("تقرير التوريد للبنك (مُجمّع مع المجموع النهائي)")
+        st.subheader("تقرير التوريد للبنك (مُجمّع مع إطار وحدود للجدول)")
         d1, d2 = st.columns(2)
         start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1), key="b_d1")
         end_d = d2.date_input("إلى تاريخ", value=datetime.today(), key="b_d2")
@@ -352,7 +352,7 @@ if t3 is not None:
             total_sum = df["المبلغ الإجمالي (درهم)"].sum()
             total_months = df["إجمالي عدد الأشهر"].sum()
             
-            # إضافة سطر المجموع الإجمالي لأسفل الجدول مباشرة
+            # إضافة سطر المجموع الإجمالي لأسفل الجدول
             df_display = df.copy()
             total_row = pd.DataFrame([{
                 "اسم المكتري": "📊 المجموع الإجمالي",
@@ -363,16 +363,76 @@ if t3 is not None:
             }])
             df_display = pd.concat([df_display, total_row], ignore_index=True)
             
-            # عرض الجدول مع سطر المجموع النهائي
-            st.dataframe(df_display, use_container_width=True)
+            # تنسيق العرض داخل الواجهة
+            def style_total_row(row):
+                if row["اسم المكتري"] == "📊 المجموع الإجمالي":
+                    return ['background-color: #d4edda; color: #155724; font-weight: bold;'] * len(row)
+                return [''] * len(row)
+
+            styled_df = df_display.style.apply(style_total_row, axis=1)
+            st.dataframe(styled_df, use_container_width=True)
             
-            # بطاقة إحصائية بارزة تحت الجدول
             st.metric(label="💰 مجموع المبالغ المستخلصة للفترة المحددة", value=f"{total_sum:,.2f} درهم")
             
+            # إنشاء ملف Excel بتنسيق الحدود الرسمية (Borders)
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df_display.to_excel(writer, index=False, sheet_name='التقرير')
-            st.download_button("📥 تحميل التقرير كملف Excel", data=output.getvalue(), file_name="تقرير_البنك_مجمع.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                
+                workbook = writer.book
+                worksheet = writer.sheets['التقرير']
+                
+                # تفعيل إظهار خطوط الشبكة تلقائياً
+                worksheet.hide_gridlines(0)
+                
+                # تعيين تنسيقات الحدود والخطوط
+                header_fmt = workbook.add_format({
+                    'border': 1,
+                    'bold': True,
+                    'bg_color': '#366092',
+                    'font_color': '#FFFFFF',
+                    'align': 'center',
+                    'valign': 'vcenter'
+                })
+                
+                cell_fmt = workbook.add_format({
+                    'border': 1,
+                    'align': 'right',
+                    'valign': 'vcenter'
+                })
+                
+                total_fmt = workbook.add_format({
+                    'border': 1,
+                    'bold': True,
+                    'bg_color': '#D4EDDA',
+                    'font_color': '#155724',
+                    'align': 'right',
+                    'valign': 'vcenter'
+                })
+                
+                # تطبيق إطار الحدود على رؤوس الأعمدة
+                for col_num, col_name in enumerate(df_display.columns):
+                    worksheet.write(0, col_num, col_name, header_fmt)
+                    
+                # تطبيق إطار الحدود على جميع البيانات والأسطر
+                for row_num in range(len(df_display)):
+                    is_last_row = (row_num == len(df_display) - 1)
+                    fmt = total_fmt if is_last_row else cell_fmt
+                    for col_num in range(len(df_display.columns)):
+                        val = df_display.iloc[row_num, col_num]
+                        worksheet.write(row_num + 1, col_num, val, fmt)
+                        
+                # تعديل عرض الأعمدة تلقائياً لتستوعب كافة النصوص بدون قص
+                for i, col in enumerate(df_display.columns):
+                    max_len = max(df_display[col].astype(str).map(len).max(), len(col)) + 5
+                    worksheet.set_column(i, i, max_len)
+            
+            st.download_button(
+                "📥 تحميل التقرير كملف Excel (مؤطر ومحسّن)", 
+                data=output.getvalue(), 
+                file_name="تقرير_البنك_مجمع.xlsx", 
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
         else:
             st.warning("لا توجد أداءات مسجلة في هذه الفترة.")
             
