@@ -701,29 +701,107 @@ if t6 is not None:
                     st.success("تم الحذف بنجاح!")
                     st.rerun()
 
-# --- الواجهة 7: إدارة المكترين ---
+# --- الواجهة 7: إدارة وتعديل المكترين (تعديل فردي وجماعي) ---
 if t7 is not None:
     with t7:
-        st.subheader("إدارة وتعديل المكترين")
-        tenants_edit_df = run_query("SELECT id, name FROM tenants")
+        st.subheader("⚙️ إدارة وتعديل المكترين وأرقام العقود")
+        
+        edit_mode = st.radio("اختر طريقة التعديل:", 
+                             ["✏️ تعديل فردي (مكتري واحد)", "📊 تعديل جماعي (جدول تفاعلي / Excel)"], 
+                             horizontal=True)
+        
+        tenants_edit_df = run_query("SELECT id, name, contract_id, cin, address, phone, rent_price, shop_category FROM tenants ORDER BY id ASC")
+        
         if not tenants_edit_df.empty:
-            edit_dict = dict(zip(tenants_edit_df.name, tenants_edit_df.id))
-            selected_edit_tenant = st.selectbox("اختر المكتري للتعديل:", options=list(edit_dict.keys()))
-            t_edit_id = int(edit_dict[selected_edit_tenant])
-            
-            c.execute("SELECT phone, shop_category, rent_price, start_date, address, cin FROM tenants WHERE id = %s", (t_edit_id,))
-            res_tenant = c.fetchone()
-            if res_tenant:
-                with st.form("edit_form"):
-                    new_cin = st.text_input("تحديث رقم البطاقة الوطنية (CIN):", value=res_tenant[5] if res_tenant[5] else "")
-                    new_address = st.text_input("تحديث العنوان / رقم المحل:", value=res_tenant[4] if res_tenant[4] else "")
-                    new_phone = st.text_input("تحديث الهاتف:", value=res_tenant[0] if res_tenant[0] else "")
-                    new_rent = st.number_input("تحديث ثمن الكراء الشهري:", value=float(res_tenant[2]) if res_tenant[2] else 0.0)
+            if edit_mode == "✏️ تعديل فردي (مكتري واحد)":
+                edit_dict = dict(zip(tenants_edit_df['name'], tenants_edit_df['id']))
+                selected_edit_tenant = st.selectbox("اختر المكتري للتعديل:", options=list(edit_dict.keys()))
+                t_edit_id = int(edit_dict[selected_edit_tenant])
+                
+                c.execute("SELECT phone, shop_category, rent_price, start_date, address, cin, contract_id FROM tenants WHERE id = %s", (t_edit_id,))
+                res_tenant = c.fetchone()
+                if res_tenant:
+                    with st.form("edit_form_single"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            new_contract = st.text_input("تحديث رقم عقد الكراء:", value=res_tenant[6] if res_tenant[6] else "")
+                            new_cin = st.text_input("تحديث رقم البطاقة الوطنية (CIN):", value=res_tenant[5] if res_tenant[5] else "")
+                            new_phone = st.text_input("تحديث الهاتف:", value=res_tenant[0] if res_tenant[0] else "")
+                        with c2:
+                            new_address = st.text_input("تحديث العنوان / رقم المحل:", value=res_tenant[4] if res_tenant[4] else "")
+                            new_rent = st.number_input("تحديث ثمن الكراء الشهري:", value=float(res_tenant[2]) if res_tenant[2] else 0.0)
+                        
+                        if st.form_submit_button("💾 حفظ التعديلات الفردية"):
+                            c.execute("""
+                                UPDATE tenants 
+                                SET contract_id = %s, cin = %s, address = %s, phone = %s, rent_price = %s 
+                                WHERE id = %s
+                            """, (new_contract, new_cin, new_address, new_phone, new_rent, t_edit_id))
+                            st.success("✅ تم تحديث بيانات المكتري ورقم العقد بنجاح!")
+                            st.rerun()
+
+            else:
+                st.markdown("### 1️⃣ التعديل المباشر عبر الجدول التفاعلي")
+                st.info("يمكنك تعديل أرقام العقود وكافة البيانات مباشرة داخل الجدول أسفله ثم الضغط على زر الحفظ الجماعي:")
+                
+                edited_df = st.data_editor(
+                    tenants_edit_df,
+                    column_config={
+                        "id": st.column_config.NumberColumn("ID", disabled=True),
+                        "name": "اسم المكتري",
+                        "contract_id": "رقم العقد",
+                        "cin": "رقم البطاقة",
+                        "address": "العنوان / رقم المحل",
+                        "phone": "رقم الهاتف",
+                        "rent_price": "ثمن الكراء",
+                        "shop_category": "الصنف"
+                    },
+                    disabled=["id"],
+                    use_container_width=True,
+                    num_rows="fixed",
+                    key="bulk_tenant_editor"
+                )
+                
+                if st.button("💾 حفظ التعديلات الجماعية من الجدول"):
+                    updated_count = 0
+                    for _, row in edited_df.iterrows():
+                        c.execute("""
+                            UPDATE tenants 
+                            SET contract_id = %s, name = %s, cin = %s, address = %s, phone = %s, rent_price = %s, shop_category = %s 
+                            WHERE id = %s
+                        """, (
+                            str(row['contract_id']) if pd.notna(row['contract_id']) else '',
+                            str(row['name']),
+                            str(row['cin']) if pd.notna(row['cin']) else '',
+                            str(row['address']) if pd.notna(row['address']) else '',
+                            str(row['phone']) if pd.notna(row['phone']) else '',
+                            float(row['rent_price']) if pd.notna(row['rent_price']) else 0.0,
+                            str(row['shop_category']) if pd.notna(row['shop_category']) else '',
+                            int(row['id'])
+                        ))
+                        updated_count += 1
+                    st.success(f"✅ تم حفظ التعديلات الجماعية لـ {updated_count} مكتري بنجاح!")
+                    st.rerun()
                     
-                    if st.form_submit_button("حفظ التعديلات"):
-                        c.execute("UPDATE tenants SET cin = %s, address = %s, phone = %s, rent_price = %s WHERE id = %s", (new_cin, new_address, new_phone, new_rent, t_edit_id))
-                        st.success("تم التعديل بنجاح!")
+                st.markdown("---")
+                st.markdown("### 2️⃣ التعديل الجماعي عبر رفع ملف Excel")
+                st.write("قم برفع ملف Excel يحتوي على عمود باسم **`الاسم`** وعمود باسم **`رقم العقد`** لتحديث العقود دفعة واحدة:")
+                bulk_excel = st.file_uploader("اختر ملف Excel لتحديث العقود", type=["xlsx"], key="bulk_contract_excel")
+                if bulk_excel:
+                    df_contracts = pd.read_excel(bulk_excel)
+                    st.dataframe(df_contracts.head(5))
+                    if st.button("تحديث العقود من ملف Excel"):
+                        count = 0
+                        for _, r in df_contracts.iterrows():
+                            t_name = str(r.get('الاسم', r.get('الاسم الكامل', ''))).strip()
+                            c_id = str(r.get('رقم العقد', r.get('العقد', ''))).strip()
+                            if t_name and t_name != 'nan' and c_id and c_id != 'nan':
+                                c.execute("UPDATE tenants SET contract_id = %s WHERE name ILIKE %s", (c_id, f"%{t_name}%"))
+                                count += 1
+                        st.success(f"✅ تم تحديث رقم العقد لـ {count} مكتري بنجاح من الإكسيل!")
                         st.rerun()
+        else:
+            st.warning("لا يوجد مكترين مسجلين للتعديل.")
 
 # --- الواجهة 8: النسخ الاحتياطي ---
 if t8 is not None:
