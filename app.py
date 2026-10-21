@@ -323,7 +323,7 @@ if t2 is not None:
                             st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح!")
                         st.rerun()
 
-# --- الواجهة 3: تقرير البنك (النسخة النهائية المحدثة بالكامل) ---
+# --- الواجهة 3: تقرير البنك ---
 if t3 is not None:
     with t3:
         st.subheader("تقرير التوريد للبنك (مُجمّع ومحدد للطباعة في صفحة واحدة)")
@@ -331,19 +331,20 @@ if t3 is not None:
         start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1), key="b_d1")
         end_d = d2.date_input("إلى تاريخ", value=datetime.today(), key="b_d2")
         
+        # استعلام مطور يضمن جلب الصنف ورقم المحل ومعالجة النصوص الفارغة
         query = """
         SELECT 
             p.tenant_name AS "اسم المكتري", 
-            COALESCE(t.contract_id, 'غير متوفر') AS "رقم العقد",
-            COALESCE(t.shop_category, 'غير محدد') AS "الصنف",
-            COALESCE(t.address, 'غير متوفر') AS "رقم المحل",
+            COALESCE(NULLIF(MAX(t.contract_id), ''), 'غير متوفر') AS "رقم العقد",
+            COALESCE(NULLIF(MAX(t.shop_category), ''), 'غير محدد') AS "الصنف",
+            COALESCE(NULLIF(MAX(t.address), ''), 'غير متوفر') AS "رقم المحل",
             SUM(p.months_paid) AS "عدد الأشهر", 
             STRING_AGG(p.paid_months_names, '، ') AS "الأشهر المؤداة", 
             SUM(p.amount) AS "المبلغ الإجمالي (درهم)"
         FROM payments p
-        LEFT JOIN tenants t ON p.tenant_id = t.id
+        LEFT JOIN tenants t ON (p.tenant_id = t.id OR p.tenant_name = t.name)
         WHERE p.payment_date BETWEEN %s AND %s
-        GROUP BY p.tenant_id, p.tenant_name, t.contract_id, t.shop_category, t.address
+        GROUP BY p.tenant_name
         """
         
         df = run_query(query, (str(start_d), str(end_d)))
@@ -381,14 +382,10 @@ if t3 is not None:
                 workbook = writer.book
                 worksheet = writer.sheets['التقرير']
                 
-                # تفعيل الاتجاه من اليمين إلى اليسار للغة العربية
                 worksheet.right_to_left()
-                
-                # إعدادات الطباعة العريضة A4
                 worksheet.set_landscape()
                 worksheet.set_paper(9) # A4
                 worksheet.fit_to_pages(1, 0)
-                
                 worksheet.hide_gridlines(0)
                 
                 header_fmt = workbook.add_format({
