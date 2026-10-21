@@ -253,7 +253,11 @@ if t2 is not None:
     with t2:
         st.subheader("تسجيل أداء جديد مع وصل الدفع")
         selected_filter_cat = st.selectbox("فلترة المكترين حسب الصنف:", options=["الكل"] + category_options, key="pay_cat_filter")
-        tenants_df = run_query("SELECT id, name, rent_price, start_date FROM tenants") if selected_filter_cat == "الكل" else run_query("SELECT id, name, rent_price, start_date FROM tenants WHERE shop_category = %s", (selected_filter_cat,))
+        
+        if selected_filter_cat == "الكل":
+            tenants_df = run_query("SELECT id, name, rent_price, start_date FROM tenants")
+        else:
+            tenants_df = run_query("SELECT id, name, rent_price, start_date FROM tenants WHERE shop_category = %s", (selected_filter_cat,))
         
         if not tenants_df.empty:
             tenant_dict = dict(zip(tenants_df.name, tenants_df.id))
@@ -265,25 +269,37 @@ if t2 is not None:
             unpaid_count, unpaid_names, next_months_names, paid_months = get_due_status(start_date_str, t_id)
             selected_months = st.multiselect("اختر الأشهر المراد أداؤها:", options=next_months_names, default=unpaid_names if unpaid_count > 0 else [])
             months_paid = len(selected_months)
-            calculated_amount = float(current_tenant_rent * months_paid) if current_tenant_rent else 0.0
             
             with st.form("payment_form", clear_on_submit=True):
                 c1, c2 = st.columns(2)
-                amount = c1.number_input("المبلغ الإجمالي المدفوع (درهم)", value=calculated_amount, min_value=0.0, step=100.0)
-                payment_date = c2.date_input("تاريخ الأداء", datetime.today())
-                employee_name = st.text_input("اسم الموظف المستخلص")
-                receipt_file = st.file_uploader("صورة أو ملف وصل الأداء", type=["pdf", "png", "jpg", "jpeg"], key="payment_receipt_file")
+                payment_date = c1.date_input("تاريخ الأداء", datetime.today())
+                employee_name = c2.text_input("اسم الموظف المستخلص")
+                
+                st.markdown("---")
+                st.write("**إرفاق وصولات الأداء (ستظهر خانة لكل شهر اخترته):**")
+                
+                # إنشاء خانة رفع ملف لكل شهر تم اختياره
+                receipt_files = {}
+                if months_paid > 0:
+                    for m in selected_months:
+                        receipt_files[m] = st.file_uploader(f"وصل أداء خاص بشهر: {m} ({current_tenant_rent} درهم)", type=["pdf", "png", "jpg", "jpeg"], key=f"rec_{m}")
                 
                 if st.form_submit_button("تأكيد وتسجيل الأداء"):
                     if months_paid == 0:
                         st.warning("المرجو اختيار شهر واحد على الأقل.")
                     else:
-                        paid_months_str = "، ".join(selected_months)
-                        receipt_bytes, receipt_name = get_file_data(receipt_file)
-                        c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                                  (t_id, selected_tenant, months_paid, amount, str(payment_date), employee_name, paid_months_str, receipt_bytes, receipt_name))
-                        st.success("تم تسجيل الأداء بنجاح!")
+                        # سيتم تسجيل كل شهر كعملية أداء مستقلة لربط كل شهر بوصله الخاص
+                        for m in selected_months:
+                            r_file = receipt_files[m]
+                            r_bytes, r_name = get_file_data(r_file)
+                            
+                            c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                                      (t_id, selected_tenant, 1, current_tenant_rent, str(payment_date), employee_name, m, r_bytes, r_name))
+                            
+                        st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح، وتم ربط كل شهر بوصله الخاص!")
                         st.rerun()
+        else:
+            st.warning("لا يوجد مكترين مسجلين.")
 
 # --- الواجهة 3: تقرير البنك ---
 if t3 is not None:
