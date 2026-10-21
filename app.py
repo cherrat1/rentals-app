@@ -237,14 +237,21 @@ if t1 is not None:
                 if st.button("تأكيد استيراد البيانات"):
                     imported_count = 0
                     for index, row in df_excel.iterrows():
-                        t_name = ""
-                        for col in df_excel.columns:
-                            if "الاسم" in str(col) or "اسم" in str(col):
-                                t_name = str(row[col])
-                                break
+                        t_name = str(row.get('الاسم الكامل', row.get('الاسم', '')))
                         if t_name.strip() != "" and t_name.strip() != "nan":
-                            c.execute("INSERT INTO tenants (name, shop_category, start_date, rent_price) VALUES (%s, %s, %s, %s)",
-                                      (t_name, excel_default_category, str(datetime.today().date()), 0.0))
+                            t_cin = str(row.get('رقم البطاقة', row.get('CIN', '')))
+                            t_phone = str(row.get('رقم الهاتف', row.get('الهاتف', '')))
+                            t_address = str(row.get('العنوان', row.get('رقم المحل', '')))
+                            t_rent = row.get('ثمن الكراء', row.get('الثمن', 0.0))
+                            
+                            if t_cin.lower() == 'nan': t_cin = ""
+                            if t_phone.lower() == 'nan': t_phone = ""
+                            if t_address.lower() == 'nan': t_address = ""
+                            try: t_rent = float(t_rent)
+                            except: t_rent = 0.0
+                            
+                            c.execute("INSERT INTO tenants (name, cin, address, shop_category, start_date, rent_price, phone) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                                      (t_name, t_cin, t_address, excel_default_category, str(datetime.today().date()), t_rent, t_phone))
                             imported_count += 1
                     st.success(f"تم بنجاح استيراد {imported_count} مكتري!")
 
@@ -289,8 +296,7 @@ if t2 is not None:
                         st.info(f"**المبلغ الإجمالي:** {calculated_amount} درهم")
                         single_receipt_file = st.file_uploader("إرفاق الوصل الإجمالي", type=["pdf", "png", "jpg", "jpeg"])
                     else:
-                        st.info(f"اختر {months_paid} ملفات. (يمكنك تحديدها كلها دفعة واحدة بالماوس أو بـ Ctrl). سيتم ربط كل ملف بشهر تلقائياً.")
-                        # الخاصية accept_multiple_files=True هي التي تسمح برفع عدة ملفات دفعة واحدة
+                        st.info(f"اختر {months_paid} ملفات (يمكنك تحديدها دفعة واحدة بـ Ctrl). سيتم ربط كل ملف بشهر تلقائياً.")
                         uploaded_multiple_files = st.file_uploader("إرفاق الوصولات (رفع متعدد)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
                 
                 if st.form_submit_button("تأكيد وتسجيل الأداء"):
@@ -306,12 +312,7 @@ if t2 is not None:
                                       (t_id, selected_tenant, months_paid, calculated_amount, str(payment_date), employee_name, paid_months_str, r_bytes, r_name))
                             
                             st.success(f"✅ تم تسجيل أداء إجمالي بقيمة {calculated_amount} درهم عن {months_paid} أشهر بنجاح!")
-                        
                         else:
-                            # حالة الرفع المتعدد
-                            if len(uploaded_multiple_files) > 0 and len(uploaded_multiple_files) != months_paid:
-                                st.warning(f"تنبيه: لقد اخترت {months_paid} أشهر، ولكنك رفعت {len(uploaded_multiple_files)} ملفات. سيتم ربط الملفات المتاحة فقط.")
-                            
                             for i, m in enumerate(selected_months):
                                 r_file = uploaded_multiple_files[i] if i < len(uploaded_multiple_files) else None
                                 r_bytes, r_name = get_file_data(r_file)
@@ -319,13 +320,10 @@ if t2 is not None:
                                 c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
                                           (t_id, selected_tenant, 1, current_tenant_rent, str(payment_date), employee_name, m, r_bytes, r_name))
                                 
-                            st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح، وتم توزيع الملفات المرفوعة على الأشهر!")
-                        
+                            st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح!")
                         st.rerun()
-        else:
-            st.warning("لا يوجد مكترين مسجلين.")
 
-# --- الواجهة 3: تقرير البنك ---
+# --- الواجهة 3: تقرير البنك (النسخة النهائية المحدثة بالكامل) ---
 if t3 is not None:
     with t3:
         st.subheader("تقرير التوريد للبنك (مُجمّع ومحدد للطباعة في صفحة واحدة)")
@@ -333,7 +331,6 @@ if t3 is not None:
         start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1), key="b_d1")
         end_d = d2.date_input("إلى تاريخ", value=datetime.today(), key="b_d2")
         
-        # استعلام يدمج البيانات ويجلب رقم العقد والصنف ورقم المحل
         query = """
         SELECT 
             p.tenant_name AS "اسم المكتري", 
@@ -355,7 +352,6 @@ if t3 is not None:
             total_sum = df["المبلغ الإجمالي (درهم)"].sum()
             total_months = df["عدد الأشهر"].sum()
             
-            # إضافة سطر المجموع الإجمالي لأسفل الجدول
             df_display = df.copy()
             total_row = pd.DataFrame([{
                 "اسم المكتري": "📊 المجموع الإجمالي",
@@ -368,7 +364,6 @@ if t3 is not None:
             }])
             df_display = pd.concat([df_display, total_row], ignore_index=True)
             
-            # تنسيق العرض داخل الواجهة
             def style_total_row(row):
                 if row["اسم المكتري"] == "📊 المجموع الإجمالي":
                     return ['background-color: #d4edda; color: #155724; font-weight: bold;'] * len(row)
@@ -379,7 +374,6 @@ if t3 is not None:
             
             st.metric(label="💰 مجموع المبالغ المستخلصة للفترة المحددة", value=f"{total_sum:,.2f} درهم")
             
-            # إنشاء ملف Excel مضبوط للطباعة في صفحة واحدة
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df_display.to_excel(writer, index=False, sheet_name='التقرير')
@@ -387,14 +381,16 @@ if t3 is not None:
                 workbook = writer.book
                 worksheet = writer.sheets['التقرير']
                 
-                # إعدادات الطباعة: وضع أفقي (Landscape) وعرض في صفحة واحدة (A4)
+                # تفعيل الاتجاه من اليمين إلى اليسار للغة العربية
+                worksheet.right_to_left()
+                
+                # إعدادات الطباعة العريضة A4
                 worksheet.set_landscape()
-                worksheet.set_paper(9)  # A4
-                worksheet.fit_to_pages(1, 0)  # ضبط عرض الجدول ليناسب صفحة واحدة تماماً
+                worksheet.set_paper(9) # A4
+                worksheet.fit_to_pages(1, 0)
                 
                 worksheet.hide_gridlines(0)
                 
-                # التنسيقات
                 header_fmt = workbook.add_format({
                     'border': 1,
                     'bold': True,
@@ -419,11 +415,9 @@ if t3 is not None:
                     'valign': 'vcenter'
                 })
                 
-                # كتابة رؤوس الأعمدة
                 for col_num, col_name in enumerate(df_display.columns):
                     worksheet.write(0, col_num, col_name, header_fmt)
                     
-                # كتابة البيانات والأطر
                 for row_num in range(len(df_display)):
                     is_last_row = (row_num == len(df_display) - 1)
                     fmt = total_fmt if is_last_row else cell_fmt
@@ -431,7 +425,6 @@ if t3 is not None:
                         val = df_display.iloc[row_num, col_num]
                         worksheet.write(row_num + 1, col_num, val, fmt)
                         
-                # قياسات دقيقة ومخصصة لعرض الأعمدة لتناسب الطباعة العريضة
                 col_widths = {
                     "اسم المكتري": 22,
                     "رقم العقد": 12,
@@ -447,14 +440,14 @@ if t3 is not None:
                     worksheet.set_column(i, i, w)
             
             st.download_button(
-                "📥 تحميل التقرير كملف Excel (مؤطر للطباعة في صفحة واحدة)", 
+                "📥 تحميل التقرير كملف Excel (مؤطر ومحدد للطباعة)", 
                 data=output.getvalue(), 
                 file_name="تقرير_البنك_مجمع.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
             st.warning("لا توجد أداءات مسجلة في هذه الفترة.")
-            
+
 # --- الواجهة 4: المتقاعسون ---
 if t4 is not None:
     with t4:
@@ -501,7 +494,6 @@ if t4 is not None:
                     months_str = "، ".join(u_nms)
                     date_today = datetime.today().strftime("%Y-%m-%d")
                     
-                    # 1. الواتساب الذكي
                     if sel_phone and sel_phone.lower() != 'nan' and sel_phone.strip() != '':
                         p_clean = sel_phone.replace(" ", "").replace("+", "").replace("-", "")
                         if p_clean.startswith("00212"): p_clean = p_clean[2:]
@@ -513,12 +505,9 @@ if t4 is not None:
                     else:
                         st.warning("رقم الهاتف غير مسجل لهذا المكتري.")
                     
-                    # 2. توليد الوورد
                     def create_word_notice(notice_type):
-                        if not HAS_DOCX:
-                            return None
+                        if not HAS_DOCX: return None
                         doc = Document()
-                        
                         p_head = doc.add_paragraph()
                         p_head.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         p_head.add_run("المملكة المغربية\nالمجلس الجماعي\nمصلحة الممتلكات\n").bold = True
@@ -570,7 +559,6 @@ if t4 is not None:
                         if word_n2:
                             st.download_button("📥 تحميل الإنذار الثاني (Word)", data=word_n2, file_name=f"إنذار_ثاني_{selected_def_name}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-                    # 3. الأرشفة
                     c.execute("SELECT notice_1_filename, notice_2_filename, cancellation_filename FROM tenants WHERE id = %s", (sel_id,))
                     f_res = c.fetchone()
                     
@@ -605,8 +593,8 @@ if t4 is not None:
                                 st.success("تم الرفع!"); st.rerun()
         else:
             st.success("لا توجد متقاعسين.")
-            
-# --- الواجهة 5: البحث والتصفية (النسخة الجديدة الشاملة) ---
+
+# --- الواجهة 5: البحث والتصفية ---
 if t5 is not None:
     with t5:
         st.subheader("البحث عن مكتري وعرض التفاصيل، الديون، والمرفقات")
@@ -652,7 +640,6 @@ if t5 is not None:
                                 with st.expander(f"📅 دفعة بتاريخ {p_row['payment_date']} | مبلغ {p_row['amount']} درهم"):
                                     st.write(f"**الأشهر التي تم أداؤها:** {p_row['paid_months_names']}")
                                     if pd.notna(p_row.get('receipt_file')) and p_row.get('receipt_file'):
-                                        # التصحيح: تحويل الملف إلى صيغة bytes
                                         file_bytes = bytes(p_row['receipt_file'])
                                         st.download_button(label=f"📥 تحميل وصل الأداء ({p_row.get('receipt_filename', 'وصل.pdf')})", data=file_bytes, file_name=p_row.get('receipt_filename', 'وصل.pdf'), key=f"rec_{t_id}_{p_idx}")
                                     else:
@@ -670,7 +657,6 @@ if t5 is not None:
 
                     st.markdown("### 📁 الوثائق والمرفقات الأساسية")
                     attachments = []
-                    # التصحيح: تحويل كافة المرفقات إلى صيغة bytes
                     if pd.notna(row.get('id_card_file')) and row.get('id_card_file'):
                         attachments.append((row.get('id_card_filename', 'البطاقة.pdf'), bytes(row['id_card_file'])))
                     if pd.notna(row.get('contract_file')) and row.get('contract_file'):
@@ -693,7 +679,7 @@ if t5 is not None:
                         st.info("لا توجد وثائق أساسية مسجلة لهذا المكتري.")
         else:
             st.info("لا يوجد أي مكتري مسجل في النظام بعد.")
-            
+
 # --- الواجهة 6: تصحيح الأخطاء ---
 if t6 is not None:
     with t6:
@@ -718,16 +704,17 @@ if t7 is not None:
             selected_edit_tenant = st.selectbox("اختر المكتري للتعديل:", options=list(edit_dict.keys()))
             t_edit_id = int(edit_dict[selected_edit_tenant])
             
-            c.execute("SELECT phone, shop_category, rent_price, start_date, address FROM tenants WHERE id = %s", (t_edit_id,))
+            c.execute("SELECT phone, shop_category, rent_price, start_date, address, cin FROM tenants WHERE id = %s", (t_edit_id,))
             res_tenant = c.fetchone()
             if res_tenant:
                 with st.form("edit_form"):
-                    new_address = st.text_input("تحديث العنوان:", value=res_tenant[4] if res_tenant[4] else "")
+                    new_cin = st.text_input("تحديث رقم البطاقة الوطنية (CIN):", value=res_tenant[5] if res_tenant[5] else "")
+                    new_address = st.text_input("تحديث العنوان / رقم المحل:", value=res_tenant[4] if res_tenant[4] else "")
                     new_phone = st.text_input("تحديث الهاتف:", value=res_tenant[0] if res_tenant[0] else "")
-                    new_rent = st.number_input("تحديث ثمن الكراء:", value=float(res_tenant[2]) if res_tenant[2] else 0.0)
+                    new_rent = st.number_input("تحديث ثمن الكراء الشهري:", value=float(res_tenant[2]) if res_tenant[2] else 0.0)
                     
                     if st.form_submit_button("حفظ التعديلات"):
-                        c.execute("UPDATE tenants SET address = %s, phone = %s, rent_price = %s WHERE id = %s", (new_address, new_phone, new_rent, t_edit_id))
+                        c.execute("UPDATE tenants SET cin = %s, address = %s, phone = %s, rent_price = %s WHERE id = %s", (new_cin, new_address, new_phone, new_rent, t_edit_id))
                         st.success("تم التعديل بنجاح!")
                         st.rerun()
 
