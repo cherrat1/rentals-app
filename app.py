@@ -324,16 +324,15 @@ if t2 is not None:
                         st.rerun()
         else:
             st.warning("لا يوجد مكترين مسجلين.")
-            
+
 # --- الواجهة 3: تقرير البنك ---
 if t3 is not None:
     with t3:
-        st.subheader("تقرير التوريد للبنك (مُجمّع)")
+        st.subheader("تقرير التوريد للبنك (مُجمّع مع المجموع النهائي)")
         d1, d2 = st.columns(2)
         start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1), key="b_d1")
         end_d = d2.date_input("إلى تاريخ", value=datetime.today(), key="b_d2")
         
-        # استعلام يدمج أداءات نفس المكتري في سطر واحد، يجلب رقم العقد، ويخفي الموظف والتاريخ
         query = """
         SELECT 
             p.tenant_name AS "اسم المكتري", 
@@ -350,16 +349,30 @@ if t3 is not None:
         df = run_query(query, (str(start_d), str(end_d)))
         
         if not df.empty:
-            st.dataframe(df, width='stretch')
+            total_sum = df["المبلغ الإجمالي (درهم)"].sum()
+            total_months = df["إجمالي عدد الأشهر"].sum()
             
-            # حساب المجموع النهائي للمبالغ المستخلصة وعرضه بشكل بارز في الأسفل
-            total_sum = df['المبلغ الإجمالي (درهم)'].sum()
-            st.success(f"💰 المجموع النهائي للمبالغ المستخلصة في هذه الفترة: **{total_sum} درهم**")
+            # إضافة سطر المجموع الإجمالي لأسفل الجدول مباشرة
+            df_display = df.copy()
+            total_row = pd.DataFrame([{
+                "اسم المكتري": "📊 المجموع الإجمالي",
+                "رقم العقد": "---",
+                "إجمالي عدد الأشهر": total_months,
+                "الأشهر المؤداة": "---",
+                "المبلغ الإجمالي (درهم)": total_sum
+            }])
+            df_display = pd.concat([df_display, total_row], ignore_index=True)
+            
+            # عرض الجدول مع سطر المجموع النهائي
+            st.dataframe(df_display, use_container_width=True)
+            
+            # بطاقة إحصائية بارزة تحت الجدول
+            st.metric(label="💰 مجموع المبالغ المستخلصة للفترة المحددة", value=f"{total_sum:,.2f} درهم")
             
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False, sheet_name='التقرير')
-            st.download_button("📥 تحميل التقرير المُجمّع كملف Excel", data=output.getvalue(), file_name="تقرير_البنك_مجمع.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                df_display.to_excel(writer, index=False, sheet_name='التقرير')
+            st.download_button("📥 تحميل التقرير كملف Excel", data=output.getvalue(), file_name="تقرير_البنك_مجمع.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         else:
             st.warning("لا توجد أداءات مسجلة في هذه الفترة.")
             
