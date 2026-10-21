@@ -326,22 +326,41 @@ if t2 is not None:
 # --- الواجهة 3: تقرير البنك ---
 if t3 is not None:
     with t3:
-        st.subheader("تقرير التوريد للبنك")
+        st.subheader("تقرير التوريد للبنك (مُجمّع)")
         d1, d2 = st.columns(2)
         start_d = d1.date_input("من تاريخ", value=datetime.today().replace(day=1), key="b_d1")
         end_d = d2.date_input("إلى تاريخ", value=datetime.today(), key="b_d2")
-        df = run_query("SELECT tenant_name AS \"اسم المكتري\", months_paid AS \"عدد الأشهر\", paid_months_names AS \"الأشهر المؤداة\", amount AS \"المبلغ\", payment_date AS \"تاريخ الأداء\", employee AS \"الموظف\" FROM payments WHERE payment_date BETWEEN %s AND %s", (str(start_d), str(end_d)))
+        
+        # استعلام يدمج أداءات نفس المكتري في سطر واحد، يجلب رقم العقد، ويخفي الموظف والتاريخ
+        query = """
+        SELECT 
+            p.tenant_name AS "اسم المكتري", 
+            COALESCE(t.contract_id, 'غير متوفر') AS "رقم العقد",
+            SUM(p.months_paid) AS "إجمالي عدد الأشهر", 
+            STRING_AGG(p.paid_months_names, '، ') AS "الأشهر المؤداة", 
+            SUM(p.amount) AS "المبلغ الإجمالي (درهم)"
+        FROM payments p
+        LEFT JOIN tenants t ON p.tenant_id = t.id
+        WHERE p.payment_date BETWEEN %s AND %s
+        GROUP BY p.tenant_id, p.tenant_name, t.contract_id
+        """
+        
+        df = run_query(query, (str(start_d), str(end_d)))
+        
         if not df.empty:
             st.dataframe(df, width='stretch')
-            st.success(f"المبلغ الإجمالي الموجه للبنك: {df['المبلغ'].sum()} درهم")
+            
+            # حساب المجموع النهائي للمبالغ المستخلصة وعرضه بشكل بارز في الأسفل
+            total_sum = df['المبلغ الإجمالي (درهم)'].sum()
+            st.success(f"💰 المجموع النهائي للمبالغ المستخلصة في هذه الفترة: **{total_sum} درهم**")
             
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=False, sheet_name='التقرير')
-            st.download_button("📥 تحميل التقرير كملف Excel", data=output.getvalue(), file_name="تقرير_البنك.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.download_button("📥 تحميل التقرير المُجمّع كملف Excel", data=output.getvalue(), file_name="تقرير_البنك_مجمع.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         else:
-            st.warning("لا توجد أداءات في هذه الفترة.")
-
+            st.warning("لا توجد أداءات مسجلة في هذه الفترة.")
+            
 # --- الواجهة 4: المتقاعسون ---
 if t4 is not None:
     with t4:
