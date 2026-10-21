@@ -276,27 +276,49 @@ if t2 is not None:
                 employee_name = c2.text_input("اسم الموظف المستخلص")
                 
                 st.markdown("---")
-                st.write("**إرفاق وصولات الأداء (ستظهر خانة لكل شهر اخترته):**")
+                # إضافة خيار لاختيار طريقة رفع الوصولات
+                receipt_option = st.radio("كيف تريد إرفاق الوصولات؟", 
+                                          options=["📄 وصل واحد يجمع كل الأشهر المحددة", "📑 وصل منفصل لكل شهر على حدة"], 
+                                          horizontal=True)
                 
-                # إنشاء خانة رفع ملف لكل شهر تم اختياره
+                single_receipt_file = None
                 receipt_files = {}
+                
                 if months_paid > 0:
-                    for m in selected_months:
-                        receipt_files[m] = st.file_uploader(f"وصل أداء خاص بشهر: {m} ({current_tenant_rent} درهم)", type=["pdf", "png", "jpg", "jpeg"], key=f"rec_{m}")
+                    if receipt_option == "📄 وصل واحد يجمع كل الأشهر المحددة":
+                        calculated_amount = float(current_tenant_rent * months_paid)
+                        st.info(f"**المبلغ الإجمالي:** {calculated_amount} درهم")
+                        single_receipt_file = st.file_uploader("إرفاق الوصل الإجمالي", type=["pdf", "png", "jpg", "jpeg"])
+                    else:
+                        for m in selected_months:
+                            receipt_files[m] = st.file_uploader(f"وصل أداء خاص بشهر: {m} ({current_tenant_rent} درهم)", type=["pdf", "png", "jpg", "jpeg"], key=f"rec_{m}")
                 
                 if st.form_submit_button("تأكيد وتسجيل الأداء"):
                     if months_paid == 0:
                         st.warning("المرجو اختيار شهر واحد على الأقل.")
                     else:
-                        # سيتم تسجيل كل شهر كعملية أداء مستقلة لربط كل شهر بوصله الخاص
-                        for m in selected_months:
-                            r_file = receipt_files[m]
-                            r_bytes, r_name = get_file_data(r_file)
+                        if receipt_option == "📄 وصل واحد يجمع كل الأشهر المحددة":
+                            # تسجيل كعملية واحدة مجمعة
+                            r_bytes, r_name = get_file_data(single_receipt_file)
+                            paid_months_str = "، ".join(selected_months)
+                            calculated_amount = float(current_tenant_rent * months_paid)
                             
                             c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                                      (t_id, selected_tenant, 1, current_tenant_rent, str(payment_date), employee_name, m, r_bytes, r_name))
+                                      (t_id, selected_tenant, months_paid, calculated_amount, str(payment_date), employee_name, paid_months_str, r_bytes, r_name))
                             
-                        st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح، وتم ربط كل شهر بوصله الخاص!")
+                            st.success(f"✅ تم تسجيل أداء إجمالي بقيمة {calculated_amount} درهم عن {months_paid} أشهر بنجاح!")
+                        
+                        else:
+                            # تسجيل كعمليات منفصلة
+                            for m in selected_months:
+                                r_file = receipt_files[m]
+                                r_bytes, r_name = get_file_data(r_file)
+                                
+                                c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                                          (t_id, selected_tenant, 1, current_tenant_rent, str(payment_date), employee_name, m, r_bytes, r_name))
+                                
+                            st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح، وتم ربط كل شهر بوصله الخاص!")
+                        
                         st.rerun()
         else:
             st.warning("لا يوجد مكترين مسجلين.")
