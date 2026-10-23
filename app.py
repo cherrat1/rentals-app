@@ -339,16 +339,28 @@ if t2 is not None:
         else:
             st.warning("لا يوجد مكترين مسجلين.")
 
-# --- الواجهة 3: تقرير البنك (نظام الإغلاق التلقائي والأرشيف) ---
+# --- الواجهة 3: تقرير البنك (النسخة الشاملة مع أداة تسوية البيانات القديمة) ---
 if t3 is not None:
     with t3:
         st.subheader("🏦 تقرير التوريد للبنك (التتبع والتحيين التلقائي)")
         
-        # إضافة عامود حالة الإرسال للبنك تلقائياً إن لم يكن موجوداً
+        # التأكد من وجود العمود
         try:
             c.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS is_sent_to_bank BOOLEAN DEFAULT FALSE;")
         except:
             pass
+
+        # 🛠️ أداة تسوية وتصفية العمليات القديمة التي أُدخلت قبل التحديث
+        with st.expander("🛠️ تسوية البيانات القديمة (تصفية العمليات المدخلة سابقاً)"):
+            st.write("إذا كانت لديك عمليات قديمة أدخلتها للتوثيق وتظهر في التقرير، حدد تاريخ نهايتها واضغط الزر لتحويلها جميعاً إلى حالة **مرسلة للبنك** دفعة واحدة:")
+            c_date1, c_date2 = st.columns(2)
+            cutoff_date = c_date1.date_input("تحديث كافة العمليات المسجلة حتى تاريخ:", value=datetime.today(), key="cutoff_d")
+            if c_date2.button("✅ تحويل كافة العمليات السابقة إلى (مرسلة للبنك)"):
+                c.execute("UPDATE payments SET is_sent_to_bank = TRUE WHERE payment_date <= %s AND COALESCE(is_sent_to_bank, FALSE) = FALSE;", (str(cutoff_date),))
+                st.success(f"✅ تم تحويل جميع العمليات المسجلة حتى {cutoff_date} إلى حالة (مرسلة للبنك) بنجاح!")
+                st.rerun()
+
+        st.markdown("---")
             
         report_mode = st.radio("اختر نوع التقرير:", 
                               ["🆕 العمليات الجديدة (غير المرسلة للبنك)", "📜 أرشيف التقارير السابقة (حسب التاريخ)"], 
@@ -403,7 +415,6 @@ if t3 is not None:
             df["رقم المحل"] = df.apply(clean_shop_num, axis=1)
             total_sum = df["المبلغ الإجمالي (درهم)"].sum()
             
-            # عرض الجدول في الواجهة
             df_display_ui = df.copy()
             total_row = pd.DataFrame([{
                 "اسم المكتري": "المجموع",
@@ -426,7 +437,6 @@ if t3 is not None:
             
             st.metric(label="💰 مجموع المبالغ المستخلصة لهذا التقرير", value=f"{total_sum:,.2f} درهم")
             
-            # إنشاء ملف Excel الرسمي
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 workbook = writer.book
@@ -495,16 +505,15 @@ if t3 is not None:
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
             
-            # زر إغلاق التقرير وحفظ العمليات كمرسلة
             if report_mode == "🆕 العمليات الجديدة (غير المرسلة للبنك)":
                 with col_btn2:
                     if st.button("🔒 إغلاق هذا التقرير وتأكيد إرساله للبنك"):
                         c.execute("UPDATE payments SET is_sent_to_bank = TRUE WHERE COALESCE(is_sent_to_bank, FALSE) = FALSE;")
-                        st.success("✅ تم إغلاق التقرير وحفظ كافة العمليات كمرسلة بنجاح! التقرير القادم سيحسب العمليات الجديدة فقط تلقائياً.")
+                        st.success("✅ تم إغلاق التقرير وحفظ كافة العمليات كمرسلة بنجاح!")
                         st.rerun()
         else:
             if report_mode == "🆕 العمليات الجديدة (غير المرسلة للبنك)":
-                st.info("✅ لا توجد عمليات جديدة غير مرسلة للبنك حالياً. جميع العمليات تم إغلاقها وإرسالها سابقاً.")
+                st.info("✅ لا توجد عمليات جديدة غير مرسلة للبنك حالياً. جميع العمليات تم تسويتها وإرسالها.")
             else:
                 st.warning("لا توجد أداءات مسجلة في هذه الفترة.")
 
