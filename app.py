@@ -150,7 +150,7 @@ try:
 except:
     pass
 
-# --- تصحيح وتوحيد الأصناف المسجلة سابقاً في قاعدة البيانات أوتوماتيكياً ---
+# تصحيح وتوحيد الأصناف المسجلة سابقاً في قاعدة البيانات أوتوماتيكياً
 try:
     c.execute("UPDATE tenants SET shop_category = 'محلات صنف 1' WHERE shop_category ILIKE 'صنف 1' OR shop_category ILIKE 'صنف 01' OR shop_category ILIKE 'صنف1' OR shop_category ILIKE '%صنف 1%';")
     c.execute("UPDATE tenants SET shop_category = 'محلات صنف 2' WHERE shop_category ILIKE 'صنف 2' OR shop_category ILIKE 'صنف 02' OR shop_category ILIKE 'صنف2' OR shop_category ILIKE '%صنف 2%';")
@@ -981,17 +981,18 @@ if t7 is not None:
                     st.rerun()
 
 # ---------------------------------------------------------
-# الواجهة 8: النسخ الاحتياطي
+# الواجهة 8: النسخ الاحتياطي (مع كشف وحساب المحلات الشاغرة)
 # ---------------------------------------------------------
 if t8 is not None:
     with t8:
-        st.subheader("💾 النسخ الاحتياطي والتقرير التفصيلي (حسب الأصناف)")
-        st.write("يقوم هذا التقرير باستخراج كافة البيانات المالية والتوثيقية للمكترين، مقسمة في صفحات مستقلة لكل صنف داخل ملف Excel واحد.")
+        st.subheader("💾 النسخ الاحتياطي والتقرير التفصيلي وحصر المحلات الشاغرة")
+        st.write("يقوم هذا التقرير باستخراج كافة البيانات المالية والتوثيقية للمكترين، مقسمة في صفحات مستقلة لكل صنف داخل ملف Excel واحد، مع حصر دقيق لأرقام المحلات الشاغرة (الفارغة).")
 
         tenants_all_df = run_query("SELECT id, name, cin, address, shop_category, rent_price, start_date FROM tenants ORDER BY shop_category ASC, id ASC")
 
         if not tenants_all_df.empty:
             backup_data = []
+            vacant_summary = []
             month_names_ar = ["يناير", "فبراير", "مارس", "أبريل", "ماي", "يونيو", "يوليوز", "غشت", "شتنبر", "أكتوبر", "نونبر", "دجنبر"]
 
             for _, row in tenants_all_df.iterrows():
@@ -1033,6 +1034,42 @@ if t8 is not None:
                 })
 
             full_backup_df = pd.DataFrame(backup_data)
+
+            # --- حساب المحلات الشاغرة (الفارغة) لكل صنف ---
+            grouped_shops = full_backup_df.groupby("الصنف")
+            for cat_name, group in grouped_shops:
+                shop_numbers = []
+                for num_str in group["رقم المحل"]:
+                    digits = re.findall(r'\d+', str(num_str))
+                    if digits:
+                        shop_numbers.append(int(digits[0]))
+                
+                if shop_numbers:
+                    max_num = max(shop_numbers)
+                    existing_set = set(shop_numbers)
+                    all_set = set(range(1, max_num + 1))
+                    vacant_nums = sorted(list(all_set - existing_set))
+                    vacant_str = "، ".join(map(str, vacant_nums)) if vacant_nums else "لا توجد أرقام ناقصة (جميع المحلات متسلسلة ومكتراة)"
+                    vacant_count = len(vacant_nums)
+                else:
+                    vacant_str = "غير محدد"
+                    vacant_count = 0
+
+                vacant_summary.append({
+                    "الصنف": cat_name,
+                    "أرقام المحلات الشاغرة (غير المكتراة)": vacant_str,
+                    "عدد المحلات الشاغرة": vacant_count
+                })
+
+            vacant_df = pd.DataFrame(vacant_summary)
+
+            # عرض المحلات الشاغرة في الواجهة
+            st.markdown("### 🏢 قائمة المحلات الشاغرة / الفارغة حسب الأصناف")
+            st.info("يحسب النظام تلقائياً أرقام المحلات الشاغرة (الناقصة من التسلسل) لتسهيل إعادة كرائها:")
+            st.dataframe(vacant_df, use_container_width=True)
+
+            st.markdown("---")
+            st.markdown("### 📊 السجل الشامل للمكترين")
             st.dataframe(full_backup_df, use_container_width=True)
 
             output = io.BytesIO()
@@ -1042,10 +1079,27 @@ if t8 is not None:
                 header_fmt = workbook.add_format({'border': 1, 'bold': True, 'bg_color': '#1F4E79', 'font_color': '#FFFFFF', 'align': 'center', 'valign': 'vcenter', 'font_size': 11})
                 cell_fmt = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter', 'font_size': 10})
                 total_fmt = workbook.add_format({'border': 1, 'bold': True, 'bg_color': '#D9E1F2', 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter', 'font_size': 11})
+                vacant_fmt = workbook.add_format({'border': 1, 'bold': True, 'bg_color': '#FCE4D6', 'font_color': '#C65911', 'align': 'center', 'valign': 'vcenter', 'font_size': 11})
 
-                grouped = full_backup_df.groupby("الصنف")
+                # 1. إضافة صفحة مستقلة للمحلات الشاغرة في Excel
+                vacant_df.to_excel(writer, index=False, sheet_name="المحلات الشاغرة")
+                ws_v = writer.sheets["المحلات الشاغرة"]
+                ws_v.right_to_left()
+                ws_v.hide_gridlines(0)
+                ws_v.set_row(0, 25)
+                for c_idx, c_name in enumerate(vacant_df.columns):
+                    ws_v.write(0, c_idx, c_name, header_fmt)
+                for r_idx in range(len(vacant_df)):
+                    ws_v.set_row(r_idx + 1, 22)
+                    for c_idx in range(len(vacant_df.columns)):
+                        v = vacant_df.iloc[r_idx, c_idx]
+                        ws_v.write(r_idx + 1, c_idx, v, vacant_fmt)
+                ws_v.set_column(0, 0, 20)
+                ws_v.set_column(1, 1, 45)
+                ws_v.set_column(2, 2, 20)
 
-                for cat_name, group in grouped:
+                # 2. تقسيم صفحات الأصناف
+                for cat_name, group in grouped_shops:
                     sheet_title = str(cat_name).replace("/", "-").replace("\\", "-")[:30]
                     cat_df = group.drop(columns=["الصنف"])
 
@@ -1084,10 +1138,19 @@ if t8 is not None:
                             v = cat_df_display.iloc[r_idx, c_idx]
                             ws.write(r_idx + 1, c_idx, v, f)
 
+                    # إضافة سطر للمحلات الشاغرة في أسفل جدول كل صنف
+                    v_row = vacant_df[vacant_df["الصنف"] == cat_name]
+                    if not v_row.empty:
+                        v_str = v_row.iloc[0]["أرقام المحلات الشاغرة (غير المكتراة)"]
+                        v_row_idx = len(cat_df_display) + 2
+                        ws.merge_range(v_row_idx, 0, v_row_idx, 2, "أرقام المحلات الشاغرة (الخالية):", vacant_fmt)
+                        ws.merge_range(v_row_idx, 3, v_row_idx, 7, v_str, cell_fmt)
+
                     widths = [24, 15, 12, 16, 14, 15, 18, 22]
                     for idx, w in enumerate(widths):
                         ws.set_column(idx, idx, w)
 
+                # 3. التقرير الشامل
                 all_sheet_df = full_backup_df.copy()
                 tot_rent_all = all_sheet_df["ثمن الكراء (درهم)"].sum()
                 tot_paid_all = all_sheet_df["الأشهر المؤداة"].sum()
@@ -1130,9 +1193,9 @@ if t8 is not None:
                     ws_all.set_column(idx, idx, w)
 
             st.download_button(
-                "📥 تحميل ملف النسخ الاحتياطي التفصيلي (Excel مقسم حسب الأصناف)",
+                "📥 تحميل ملف النسخ الاحتياطي التفصيلي وحصر المحلات الشاغرة",
                 data=output.getvalue(),
-                file_name="النسخ_الاحتياطي_الشامل_حسب_الصنف.xlsx",
+                file_name="النسخ_الاحتياطي_الشامل_مع_المحلات_الشاغرة.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         else:
