@@ -255,10 +255,17 @@ if t1 is not None:
                             imported_count += 1
                     st.success(f"تم بنجاح استيراد {imported_count} مكتري!")
 
-# --- الواجهة 2: تسجيل الأداء ---
+# --- الواجهة 2: تسجيل الأداء (مع خيار التوثيق القديم) ---
 if t2 is not None:
     with t2:
         st.subheader("تسجيل أداء جديد مع وصل الدفع")
+        
+        # التأكد من وجود عمود حالة الإرسال للبنك
+        try:
+            c.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS is_sent_to_bank BOOLEAN DEFAULT FALSE;")
+        except:
+            pass
+
         selected_filter_cat = st.selectbox("فلترة المكترين حسب الصنف:", options=["الكل"] + category_options, key="pay_cat_filter")
         
         if selected_filter_cat == "الكل":
@@ -281,6 +288,9 @@ if t2 is not None:
                 c1, c2 = st.columns(2)
                 payment_date = c1.date_input("تاريخ الأداء", datetime.today())
                 employee_name = c2.text_input("اسم الموظف المستخلص")
+                
+                # مربع اختيار لتحديد العمليات القديمة الأرشيفية
+                is_already_sent = st.checkbox("📌 هذه عملية قديمة تم إرسالها للبنك سابقاً (إدخال للأرشيف والبحث فقط)", value=False)
                 
                 st.markdown("---")
                 receipt_option = st.radio("كيف تريد إرفاق الوصولات؟", 
@@ -308,20 +318,26 @@ if t2 is not None:
                             paid_months_str = "، ".join(selected_months)
                             calculated_amount = float(current_tenant_rent * months_paid)
                             
-                            c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                                      (t_id, selected_tenant, months_paid, calculated_amount, str(payment_date), employee_name, paid_months_str, r_bytes, r_name))
+                            c.execute("""INSERT INTO payments 
+                                (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename, is_sent_to_bank) 
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                (t_id, selected_tenant, months_paid, calculated_amount, str(payment_date), employee_name, paid_months_str, r_bytes, r_name, is_already_sent))
                             
-                            st.success(f"✅ تم تسجيل أداء إجمالي بقيمة {calculated_amount} درهم عن {months_paid} أشهر بنجاح!")
+                            st.success(f"✅ تم تسجيل العملية بنجاح {'(محفوطة كمرسلة للبنك)' if is_already_sent else '(في انتظار إرسالها للبنك)'}!")
                         else:
                             for i, m in enumerate(selected_months):
                                 r_file = uploaded_multiple_files[i] if i < len(uploaded_multiple_files) else None
                                 r_bytes, r_name = get_file_data(r_file)
                                 
-                                c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                                          (t_id, selected_tenant, 1, current_tenant_rent, str(payment_date), employee_name, m, r_bytes, r_name))
+                                c.execute("""INSERT INTO payments 
+                                    (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename, is_sent_to_bank) 
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                    (t_id, selected_tenant, 1, current_tenant_rent, str(payment_date), employee_name, m, r_bytes, r_name, is_already_sent))
                                 
-                            st.success(f"✅ تم تسجيل {months_paid} عمليات أداء منفصلة بنجاح!")
+                            st.success(f"✅ تم تسجيل {months_paid} عمليات منفصلة بنجاح {'(محفوظة كمرسلة للبنك)' if is_already_sent else '(في انتظار إرسالها للبنك)'}!")
                         st.rerun()
+        else:
+            st.warning("لا يوجد مكترين مسجلين.")
 
 # --- الواجهة 3: تقرير البنك (نظام الإغلاق التلقائي والأرشيف) ---
 if t3 is not None:
