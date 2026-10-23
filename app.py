@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import io
+import re
 
 # محاولة استدعاء مكتبة الوورد للإنذارات
 try:
@@ -103,6 +104,21 @@ def run_query(query, params=None):
     cur.close()
     return pd.DataFrame()
 
+# دالة توحيد أسماء الأصناف بذكاء
+def normalize_category_name(cat_input):
+    if not cat_input or str(cat_input).lower() == 'nan' or str(cat_input).strip() == '':
+        return "أصناف أخرى"
+    
+    clean_cat = str(cat_input).strip()
+    
+    # مطابقة أرقام الأصناف (مثلاً صنف 1 -> محلات صنف 1)
+    match_num = re.search(r'\d+', clean_cat)
+    if match_num and ("صنف" in clean_cat or "محلات" in clean_cat):
+        num = int(match_num.group())
+        return f"محلات صنف {num}"
+        
+    return clean_cat
+
 # إنشاء وتحديث الجداول تلقائياً
 c.execute("""CREATE TABLE IF NOT EXISTS tenants (
     id SERIAL PRIMARY KEY, 
@@ -196,12 +212,12 @@ default_categories = ["محلات صنف 1", "محلات صنف 2", "بيع ال
 try:
     cat_df = run_query("SELECT DISTINCT shop_category FROM tenants WHERE shop_category IS NOT NULL AND shop_category != ''")
     db_categories = cat_df['shop_category'].tolist() if not cat_df.empty else []
-    category_options = list(dict.fromkeys(default_categories + db_categories))
+    category_options = list(dict.fromkeys([normalize_category_name(c) for c in default_categories + db_categories]))
 except:
     category_options = default_categories
 
 # ---------------------------------------------------------
-# الواجهة 1: إضافة مكتري (مع قراءة التواريخ والقالب)
+# الواجهة 1: إضافة مكتري
 # ---------------------------------------------------------
 if t1 is not None:
     with t1:
@@ -228,11 +244,13 @@ if t1 is not None:
                         contract_bytes, contract_name = get_file_data(contract_file)
                         cond_bytes, cond_name = get_file_data(conditions_file)
                         
+                        norm_cat = normalize_category_name(shop_category)
+                        
                         c.execute(
                             "INSERT INTO tenants (name, cin, address, shop_category, contract_id, start_date, rent_price, phone, "
                             "id_card_file, id_card_filename, contract_file, contract_filename, conditions_file, conditions_filename) "
                             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                            (name, cin, address, shop_category, contract, str(start_date), rent_price, phone, 
+                            (name, cin, address, norm_cat, contract, str(start_date), rent_price, phone, 
                              id_bytes, id_name, contract_bytes, contract_name, cond_bytes, cond_name)
                         )
                         st.success("تم حفظ المكتري بنجاح!")
@@ -243,7 +261,6 @@ if t1 is not None:
         with col2:
             st.markdown("**استيراد المكترين من ملف Excel الشامل 📥**")
             
-            # قالب Excel للتحميل
             template_data = pd.DataFrame([
                 {
                     "اسم المكتري": "أحمد بنجلون",
@@ -309,15 +326,10 @@ if t1 is not None:
                             t_raw_category = str(row.get('الصنف', row.get('صنف المحل', ''))).strip()
                             t_shop_num = str(row.get('رقم المحل', row.get('العنوان', ''))).strip()
                             
-                            # المطابقة الذكية للصنف
-                            t_category = t_raw_category
-                            if t_raw_category and t_raw_category.lower() != 'nan':
-                                for opt in category_options:
-                                    if t_raw_category.lower() == opt.lower() or t_raw_category in opt or opt in t_raw_category:
-                                        t_category = opt
-                                        break
+                            # توحيد اسم الصنف آلياً وبذكاء
+                            t_category = normalize_category_name(t_raw_category)
                             
-                            # قراءة التواريخ بالنظام المغربي dayfirst=True (DD/MM/YYYY)
+                            # قراءة التواريخ بالنظام المغربي (DD/MM/YYYY)
                             raw_date = row.get('تاريخ بداية الكراء', row.get('تاريخ البداية', ''))
                             try:
                                 if pd.notna(raw_date):
@@ -347,7 +359,7 @@ if t1 is not None:
                     st.rerun()
 
 # ---------------------------------------------------------
-# الواجهة 2: تسجيل الأداء (مع خيار التوثيق للأرشيف)
+# الواجهة 2: تسجيل الأداء
 # ---------------------------------------------------------
 if t2 is not None:
     with t2:
@@ -423,7 +435,7 @@ if t2 is not None:
                         st.rerun()
 
 # ---------------------------------------------------------
-# الواجهة 3: تقرير البنك الرسمي (مع تسوية الأرشيف والترويسة)
+# الواجهة 3: تقرير البنك الرسمي
 # ---------------------------------------------------------
 if t3 is not None:
     with t3:
@@ -515,7 +527,6 @@ if t3 is not None:
             
             st.metric(label="💰 مجموع المبالغ المستخلصة لهذا التقرير", value=f"{total_sum:,.2f} درهم")
             
-            # ملف إكسيل الرسمي
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 workbook = writer.book
@@ -596,7 +607,7 @@ if t3 is not None:
                 st.warning("لا توجد أداءات مسجلة في هذه الفترة.")
 
 # ---------------------------------------------------------
-# الواجهة 4: المتقاعسون (الإنذارات ومتابعة الإفراغ)
+# الواجهة 4: المتقاعسون
 # ---------------------------------------------------------
 if t4 is not None:
     with t4:
@@ -744,13 +755,19 @@ if t4 is not None:
             st.success("لا توجد متقاعسين.")
 
 # ---------------------------------------------------------
-# الواجهة 5: البحث والتصفية
+# الواجهة 5: البحث والتصفية (تصفية الصنف لسرعة البحث)
 # ---------------------------------------------------------
 if t5 is not None:
     with t5:
         st.subheader("البحث عن مكتري وعرض التفاصيل، الديون، والمرفقات")
         
-        all_tenants_df = run_query("SELECT id, name, cin FROM tenants")
+        # فلترة لسرعة البحث حسب الصنف
+        selected_search_cat = st.selectbox("🏷️ فلترة القائمة حسب الصنف لسرعة البحث:", options=["الكل"] + category_options, key="search_cat_filter")
+        
+        if selected_search_cat == "الكل":
+            all_tenants_df = run_query("SELECT id, name, cin, shop_category FROM tenants ORDER BY name ASC")
+        else:
+            all_tenants_df = run_query("SELECT id, name, cin, shop_category FROM tenants WHERE shop_category = %s ORDER BY name ASC", (selected_search_cat,))
         
         if not all_tenants_df.empty:
             options = [""] + [f"{row['name']} - (بطاقة: {row['cin'] if row['cin'] else 'غير متوفر'}) - [ID: {row['id']}]" for _, row in all_tenants_df.iterrows()]
@@ -828,7 +845,7 @@ if t5 is not None:
                     else:
                         st.info("لا توجد وثائق أساسية مسجلة لهذا المكتري.")
         else:
-            st.info("لا يوجد أي مكتري مسجل في النظام بعد.")
+            st.info("لا يوجد أي مكتري مسجل في هذا الصنف.")
 
 # ---------------------------------------------------------
 # الواجهة 6: تصحيح الأخطاء
@@ -847,7 +864,7 @@ if t6 is not None:
                     st.rerun()
 
 # ---------------------------------------------------------
-# الواجهة 7: إدارة وتعديل المكترين (تعديل تاريخ بداية الكراء والعقود)
+# الواجهة 7: إدارة وتعديل المكترين
 # ---------------------------------------------------------
 if t7 is not None:
     with t7:
@@ -884,7 +901,8 @@ if t7 is not None:
                             new_address = st.text_input("تحديث العنوان / رقم المحل:", value=res_tenant[4] if res_tenant[4] else "")
                             new_rent = st.number_input("تحديث ثمن الكراء الشهري:", value=float(res_tenant[2]) if res_tenant[2] else 0.0)
                             
-                            curr_cat_idx = category_options.index(res_tenant[1]) if res_tenant[1] in category_options else 0
+                            curr_cat = normalize_category_name(res_tenant[1])
+                            curr_cat_idx = category_options.index(curr_cat) if curr_cat in category_options else 0
                             new_category = st.selectbox("تحديث الصنف:", options=category_options, index=curr_cat_idx)
                         
                         if st.form_submit_button("💾 حفظ التعديلات الفردية"):
@@ -922,6 +940,7 @@ if t7 is not None:
                 if st.button("💾 حفظ التعديلات الجماعية من الجدول"):
                     updated_count = 0
                     for _, row in edited_df.iterrows():
+                        norm_cat_edited = normalize_category_name(row['shop_category'])
                         c.execute("""
                             UPDATE tenants 
                             SET contract_id = %s, name = %s, cin = %s, address = %s, phone = %s, rent_price = %s, shop_category = %s, start_date = %s 
@@ -933,7 +952,7 @@ if t7 is not None:
                             str(row['address']) if pd.notna(row['address']) else '',
                             str(row['phone']) if pd.notna(row['phone']) else '',
                             float(row['rent_price']) if pd.notna(row['rent_price']) else 0.0,
-                            str(row['shop_category']) if pd.notna(row['shop_category']) else '',
+                            norm_cat_edited,
                             str(row['start_date']) if pd.notna(row['start_date']) else str(datetime.today().date()),
                             int(row['id'])
                         ))
@@ -942,7 +961,7 @@ if t7 is not None:
                     st.rerun()
 
 # ---------------------------------------------------------
-# الواجهة 8: النسخ الاحتياطي والتصدير التفصيلي مقسم حسب الأصناف
+# الواجهة 8: النسخ الاحتياطي
 # ---------------------------------------------------------
 if t8 is not None:
     with t8:
@@ -959,7 +978,7 @@ if t8 is not None:
                 t_id = int(row['id'])
                 s_date_str = str(row['start_date'])
                 rent = float(row['rent_price']) if pd.notna(row['rent_price']) else 0.0
-                category = str(row['shop_category']) if pd.notna(row['shop_category']) and str(row['shop_category']).strip() != '' else "غير محدد"
+                category = normalize_category_name(row['shop_category'])
 
                 raw_address = str(row['address']) if pd.notna(row['address']) else "غير متوفر"
                 clean_shop = raw_address
@@ -1004,7 +1023,6 @@ if t8 is not None:
                 cell_fmt = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter', 'font_size': 10})
                 total_fmt = workbook.add_format({'border': 1, 'bold': True, 'bg_color': '#D9E1F2', 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter', 'font_size': 11})
 
-                # تقسيم حسب الصنف
                 grouped = full_backup_df.groupby("الصنف")
 
                 for cat_name, group in grouped:
@@ -1050,7 +1068,6 @@ if t8 is not None:
                     for idx, w in enumerate(widths):
                         ws.set_column(idx, idx, w)
 
-                # التقرير الشامل
                 all_sheet_df = full_backup_df.copy()
                 tot_rent_all = all_sheet_df["ثمن الكراء (درهم)"].sum()
                 tot_paid_all = all_sheet_df["الأشهر المؤداة"].sum()
