@@ -150,7 +150,7 @@ try:
 except:
     pass
 
-# تصحيح وتوحيد الأصناف المسجلة سابقاً في قاعدة البيانات أوتوماتيكياً
+# تصحيح وتوحيد الأصناف المسجلة سابقاً أوتوماتيكياً
 try:
     c.execute("UPDATE tenants SET shop_category = 'محلات صنف 1' WHERE shop_category ILIKE 'صنف 1' OR shop_category ILIKE 'صنف 01' OR shop_category ILIKE 'صنف1' OR shop_category ILIKE '%صنف 1%';")
     c.execute("UPDATE tenants SET shop_category = 'محلات صنف 2' WHERE shop_category ILIKE 'صنف 2' OR shop_category ILIKE 'صنف 02' OR shop_category ILIKE 'صنف2' OR shop_category ILIKE '%صنف 2%';")
@@ -850,7 +850,7 @@ if t5 is not None:
             st.info("لا يوجد أي مكتري مسجل في هذا الصنف.")
 
 # ---------------------------------------------------------
-# الواجهة 6: تصحيح وتعديل الأخطاء (حذف أو تعديل التاريخ والوصل)
+# الواجهة 6: تصحيح وتعديل الأخطاء (تعديل الأداء والشهر والمرفق)
 # ---------------------------------------------------------
 if t6 is not None:
     with t6:
@@ -862,7 +862,7 @@ if t6 is not None:
                 tenant_name AS "اسم المكتري", 
                 amount AS "المبلغ", 
                 payment_date AS "تاريخ الأداء",
-                paid_months_names AS "الأشهر",
+                paid_months_names AS "الأشهر المستخلصة",
                 receipt_filename AS "الملف المرفق"
             FROM payments 
             ORDER BY id DESC 
@@ -873,15 +873,14 @@ if t6 is not None:
             st.dataframe(df_recent, use_container_width=True)
 
             action_type = st.radio("اختر نوع الإجراء المطلوب:", 
-                                   ["✏️ تعديل عملية أداء (تاريخ / وصل / موظف)", "🗑️ حذف عملية أداء"], 
+                                   ["✏️ تعديل عملية أداء (تاريخ / الشهر المستخلص / وصل / موظف)", "🗑️ حذف عملية أداء"], 
                                    horizontal=True)
 
-            if action_type == "✏️ تعديل عملية أداء (تاريخ / وصل / موظف)":
+            if action_type == "✏️ تعديل عملية أداء (تاريخ / الشهر المستخلص / وصل / موظف)":
                 st.markdown("---")
                 st.markdown("### ✏️ تعديل بيانات عملية أداء مسجلة")
 
-                # قائمة اختيار العملية
-                pay_options = {f"عملية رقم #{row['رقم العملية']} - {row['اسم المكتري']} (بتاريخ {row['تاريخ الأداء']})": int(row['رقم العملية']) for _, row in df_recent.iterrows()}
+                pay_options = {f"عملية رقم #{row['رقم العملية']} - {row['اسم المكتري']} ({row['الأشهر المستخلصة']} - بتاريخ {row['تاريخ الأداء']})": int(row['رقم العملية']) for _, row in df_recent.iterrows()}
                 selected_pay_label = st.selectbox("اختر العملية المراد تعديلها:", options=list(pay_options.keys()))
 
                 if selected_pay_label:
@@ -899,11 +898,12 @@ if t6 is not None:
                             curr_d = datetime.today().date()
 
                         with st.form("edit_payment_form"):
-                            st.info(f"📍 تعديل بيانات العملية رقم: **{selected_pid}** | المبلغ: **{curr_amount} درهم** | الأشهر: **{curr_months_names}**")
+                            st.info(f"📍 تعديل بيانات العملية رقم: **{selected_pid}** | المبلغ: **{curr_amount} درهم**")
                             col_p1, col_p2 = st.columns(2)
 
                             with col_p1:
                                 new_pay_date = st.date_input("تحديث تاريخ العملية / الأداء:", value=curr_d)
+                                new_months_names = st.text_input("تحديث الشهر المستخلص (مثال: أبريل 2026):", value=curr_months_names if curr_months_names else "")
                                 new_employee = st.text_input("تحديث اسم الموظف المستخلص:", value=curr_emp if curr_emp else "")
 
                             with col_p2:
@@ -916,22 +916,20 @@ if t6 is not None:
 
                             if st.form_submit_button("💾 حفظ تعديلات عملية الأداء"):
                                 if new_receipt_file is not None:
-                                    # رفع ملف جديد وتحديث كافة البيانات
                                     r_bytes, r_name = get_file_data(new_receipt_file)
                                     c.execute("""
                                         UPDATE payments 
-                                        SET payment_date = %s, employee = %s, receipt_file = %s, receipt_filename = %s 
+                                        SET payment_date = %s, paid_months_names = %s, employee = %s, receipt_file = %s, receipt_filename = %s 
                                         WHERE id = %s
-                                    """, (str(new_pay_date), new_employee, r_bytes, r_name, selected_pid))
+                                    """, (str(new_pay_date), new_months_names, new_employee, r_bytes, r_name, selected_pid))
                                 else:
-                                    # تحديث التاريخ واسم الموظف فقط مع الاحتفاظ بالملف القديم
                                     c.execute("""
                                         UPDATE payments 
-                                        SET payment_date = %s, employee = %s 
+                                        SET payment_date = %s, paid_months_names = %s, employee = %s 
                                         WHERE id = %s
-                                    """, (str(new_pay_date), new_employee, selected_pid))
+                                    """, (str(new_pay_date), new_months_names, new_employee, selected_pid))
 
-                                st.success(f"✅ تم تحديث بيانات العملية رقم {selected_pid} بنجاح!")
+                                st.success(f"✅ تم تحديث بيانات العملية وتعديل الشهر المستخلص لرقم {selected_pid} بنجاح!")
                                 st.rerun()
 
             else:
@@ -1118,7 +1116,7 @@ if t8 is not None:
 
             full_backup_df = pd.DataFrame(backup_data)
 
-            # --- حساب المحلات الشاغرة (الفارغة) لكل صنف ---
+            # حساب المحلات الشاغرة (الفارغة) لكل صنف
             grouped_shops = full_backup_df.groupby("الصنف")
             for cat_name, group in grouped_shops:
                 shop_numbers = []
@@ -1146,7 +1144,6 @@ if t8 is not None:
 
             vacant_df = pd.DataFrame(vacant_summary)
 
-            # عرض المحلات الشاغرة في الواجهة
             st.markdown("### 🏢 قائمة المحلات الشاغرة / الفارغة حسب الأصناف")
             st.info("يحسب النظام تلقائياً أرقام المحلات الشاغرة (الناقصة من التسلسل) لتسهيل إعادة كرائها:")
             st.dataframe(vacant_df, use_container_width=True)
@@ -1164,7 +1161,6 @@ if t8 is not None:
                 total_fmt = workbook.add_format({'border': 1, 'bold': True, 'bg_color': '#D9E1F2', 'font_color': '#000000', 'align': 'center', 'valign': 'vcenter', 'font_size': 11})
                 vacant_fmt = workbook.add_format({'border': 1, 'bold': True, 'bg_color': '#FCE4D6', 'font_color': '#C65911', 'align': 'center', 'valign': 'vcenter', 'font_size': 11})
 
-                # 1. إضافة صفحة مستقلة للمحلات الشاغرة في Excel
                 vacant_df.to_excel(writer, index=False, sheet_name="المحلات الشاغرة")
                 ws_v = writer.sheets["المحلات الشاغرة"]
                 ws_v.right_to_left()
@@ -1181,7 +1177,6 @@ if t8 is not None:
                 ws_v.set_column(1, 1, 45)
                 ws_v.set_column(2, 2, 20)
 
-                # 2. تقسيم صفحات الأصناف
                 for cat_name, group in grouped_shops:
                     sheet_title = str(cat_name).replace("/", "-").replace("\\", "-")[:30]
                     cat_df = group.drop(columns=["الصنف"])
@@ -1221,7 +1216,6 @@ if t8 is not None:
                             v = cat_df_display.iloc[r_idx, c_idx]
                             ws.write(r_idx + 1, c_idx, v, f)
 
-                    # إضافة سطر للمحلات الشاغرة في أسفل جدول كل صنف
                     v_row = vacant_df[vacant_df["الصنف"] == cat_name]
                     if not v_row.empty:
                         v_str = v_row.iloc[0]["أرقام المحلات الشاغرة (غير المكتراة)"]
@@ -1233,7 +1227,6 @@ if t8 is not None:
                     for idx, w in enumerate(widths):
                         ws.set_column(idx, idx, w)
 
-                # 3. التقرير الشامل
                 all_sheet_df = full_backup_df.copy()
                 tot_rent_all = all_sheet_df["ثمن الكراء (درهم)"].sum()
                 tot_paid_all = all_sheet_df["الأشهر المؤداة"].sum()
