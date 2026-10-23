@@ -228,32 +228,112 @@ if t1 is not None:
                         st.success("تم حفظ المكتري بنجاح!")
                     else:
                         st.error("المرجو إدخال الاسم وثمن الكراء.")
-        with col2:
-            st.markdown("**استيراد المكترين من ملف Excel 📥**")
-            excel_default_category = st.selectbox("اختر الصنف الذي ينتمي له هؤلاء المكترون:", options=category_options, key="excel_cat")
-            uploaded_file = st.file_uploader("اختر ملف Excel (.xlsx)", type=["xlsx"])
+      with col2:
+            st.markdown("**استيراد المكترين من ملف Excel الشامل 📥**")
+            
+            # 1. إنشاء نموذج Excel جاهز للتحميل
+            template_data = pd.DataFrame([
+                {
+                    "اسم المكتري": "أحمد بنجلون",
+                    "رقم البطاقة": "AB123456",
+                    "تاريخ بداية الكراء": "2024-01-01",
+                    "رقم العقد": "C-2024/01",
+                    "ثمن الكراء": 1500,
+                    "الصنف": "صنف 1",
+                    "رقم المحل": "1"
+                },
+                {
+                    "اسم المكتري": "فاطمة الزهراء",
+                    "رقم البطاقة": "CD789012",
+                    "تاريخ بداية الكراء": "2024-02-15",
+                    "رقم العقد": "C-2024/02",
+                    "ثمن الكراء": 2000,
+                    "الصنف": "صنف 1",
+                    "رقم المحل": "2"
+                }
+            ])
+            
+            template_output = io.BytesIO()
+            with pd.ExcelWriter(template_output, engine='xlsxwriter') as template_writer:
+                template_data.to_excel(template_writer, index=False, sheet_name='نموذج_الاستيراد')
+                wb = template_writer.book
+                ws = template_writer.sheets['نموذج_الاستيراد']
+                
+                # ضبط الاتجاه من اليمين إلى اليسار
+                ws.right_to_left()
+                
+                # تنسيق رؤوس الأعمدة والخانات
+                header_fmt = wb.add_format({
+                    'bold': True, 'bg_color': '#366092', 'font_color': '#FFFFFF', 
+                    'border': 1, 'align': 'center', 'valign': 'vcenter'
+                })
+                cell_fmt = wb.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter'})
+                
+                for c_idx, col_name in enumerate(template_data.columns):
+                    ws.write(0, c_idx, col_name, header_fmt)
+                    ws.set_column(c_idx, c_idx, 20)
+                
+                for r_idx in range(len(template_data)):
+                    for c_idx in range(len(template_data.columns)):
+                        ws.write(r_idx + 1, c_idx, template_data.iloc[r_idx, c_idx], cell_fmt)
+
+            # زر تحميل القالب النموذجي
+            st.download_button(
+                label="📄 تحميل قالب Excel نموذجي لملء البيانات (.xlsx)",
+                data=template_output.getvalue(),
+                file_name="نموذج_استيراد_المكترين.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+            st.markdown("---")
+            
+            # 2. قسم رفع واستيراد الملف بعد ملئه
+            uploaded_file = st.file_uploader("اختر ملف Excel لرفعه بعد ملئه (.xlsx)", type=["xlsx"], key="import_full_excel")
+            
             if uploaded_file is not None:
                 df_excel = pd.read_excel(uploaded_file)
-                if st.button("تأكيد استيراد البيانات"):
+                st.dataframe(df_excel.head(5)) # عرض عينة للـتأكد
+                
+                if st.button("تأكيد استيراد البيانات الشاملة"):
                     imported_count = 0
                     for index, row in df_excel.iterrows():
-                        t_name = str(row.get('الاسم الكامل', row.get('الاسم', '')))
-                        if t_name.strip() != "" and t_name.strip() != "nan":
-                            t_cin = str(row.get('رقم البطاقة', row.get('CIN', '')))
-                            t_phone = str(row.get('رقم الهاتف', row.get('الهاتف', '')))
-                            t_address = str(row.get('العنوان', row.get('رقم المحل', '')))
-                            t_rent = row.get('ثمن الكراء', row.get('الثمن', 0.0))
+                        t_name = str(row.get('اسم المكتري', row.get('الاسم الكامل', row.get('الاسم', '')))).strip()
+                        
+                        if t_name and t_name != 'nan':
+                            t_cin = str(row.get('رقم البطاقة', row.get('CIN', ''))).strip()
+                            t_contract = str(row.get('رقم العقد', row.get('العقد', ''))).strip()
+                            t_category = str(row.get('الصنف', row.get('صنف المحل', ''))).strip()
+                            t_shop_num = str(row.get('رقم المحل', row.get('العنوان', ''))).strip()
                             
+                            raw_date = row.get('تاريخ بداية الكراء', row.get('تاريخ البداية', ''))
+                            try:
+                                if pd.notna(raw_date):
+                                    t_start_date = pd.to_datetime(raw_date).strftime('%Y-%m-%d')
+                                else:
+                                    t_start_date = str(datetime.today().date())
+                            except:
+                                t_start_date = str(datetime.today().date())
+                                
+                            raw_rent = row.get('ثمن الكراء', row.get('الثمن', 0.0))
+                            try:
+                                t_rent = float(raw_rent)
+                            except:
+                                t_rent = 0.0
+                                
                             if t_cin.lower() == 'nan': t_cin = ""
-                            if t_phone.lower() == 'nan': t_phone = ""
-                            if t_address.lower() == 'nan': t_address = ""
-                            try: t_rent = float(t_rent)
-                            except: t_rent = 0.0
+                            if t_contract.lower() == 'nan': t_contract = ""
+                            if t_category.lower() == 'nan': t_category = ""
+                            if t_shop_num.lower() == 'nan': t_shop_num = ""
                             
-                            c.execute("INSERT INTO tenants (name, cin, address, shop_category, start_date, rent_price, phone) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                                      (t_name, t_cin, t_address, excel_default_category, str(datetime.today().date()), t_rent, t_phone))
+                            c.execute("""
+                                INSERT INTO tenants 
+                                (name, cin, address, shop_category, contract_id, start_date, rent_price) 
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """, (t_name, t_cin, t_shop_num, t_category, t_contract, t_start_date, t_rent))
                             imported_count += 1
-                    st.success(f"تم بنجاح استيراد {imported_count} مكتري!")
+                            
+                    st.success(f"✅ تم بنجاح استيراد {imported_count} مكتري بكافة التفاصيل!")
+                    st.rerun()
 
 # --- الواجهة 2: تسجيل الأداء (مع خيار التوثيق القديم) ---
 if t2 is not None:
