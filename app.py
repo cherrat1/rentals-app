@@ -110,8 +110,6 @@ def normalize_category_name(cat_input):
         return "أصناف أخرى"
     
     clean_cat = str(cat_input).strip()
-    
-    # مطابقة أرقام الأصناف (مثلاً صنف 1 -> محلات صنف 1)
     match_num = re.search(r'\d+', clean_cat)
     if match_num and ("صنف" in clean_cat or "محلات" in clean_cat):
         num = int(match_num.group())
@@ -149,6 +147,13 @@ c.execute("""CREATE TABLE IF NOT EXISTS payments (
 
 try:
     c.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS is_sent_to_bank BOOLEAN DEFAULT FALSE;")
+except:
+    pass
+
+# --- تصحيح وتوحيد الأصناف المسجلة سابقاً في قاعدة البيانات أوتوماتيكياً ---
+try:
+    c.execute("UPDATE tenants SET shop_category = 'محلات صنف 1' WHERE shop_category ILIKE 'صنف 1' OR shop_category ILIKE 'صنف 01' OR shop_category ILIKE 'صنف1' OR shop_category ILIKE '%صنف 1%';")
+    c.execute("UPDATE tenants SET shop_category = 'محلات صنف 2' WHERE shop_category ILIKE 'صنف 2' OR shop_category ILIKE 'صنف 02' OR shop_category ILIKE 'صنف2' OR shop_category ILIKE '%صنف 2%';")
 except:
     pass
 
@@ -326,10 +331,8 @@ if t1 is not None:
                             t_raw_category = str(row.get('الصنف', row.get('صنف المحل', ''))).strip()
                             t_shop_num = str(row.get('رقم المحل', row.get('العنوان', ''))).strip()
                             
-                            # توحيد اسم الصنف آلياً وبذكاء
                             t_category = normalize_category_name(t_raw_category)
                             
-                            # قراءة التواريخ بالنظام المغربي (DD/MM/YYYY)
                             raw_date = row.get('تاريخ بداية الكراء', row.get('تاريخ البداية', ''))
                             try:
                                 if pd.notna(raw_date):
@@ -755,13 +758,12 @@ if t4 is not None:
             st.success("لا توجد متقاعسين.")
 
 # ---------------------------------------------------------
-# الواجهة 5: البحث والتصفية (تصفية الصنف لسرعة البحث)
+# الواجهة 5: البحث والتصفية
 # ---------------------------------------------------------
 if t5 is not None:
     with t5:
         st.subheader("البحث عن مكتري وعرض التفاصيل، الديون، والمرفقات")
         
-        # فلترة لسرعة البحث حسب الصنف
         selected_search_cat = st.selectbox("🏷️ فلترة القائمة حسب الصنف لسرعة البحث:", options=["الكل"] + category_options, key="search_cat_filter")
         
         if selected_search_cat == "الكل":
@@ -864,11 +866,29 @@ if t6 is not None:
                     st.rerun()
 
 # ---------------------------------------------------------
-# الواجهة 7: إدارة وتعديل المكترين
+# الواجهة 7: إدارة وتعديل المكترين (مع أداة دمج الأصناف)
 # ---------------------------------------------------------
 if t7 is not None:
     with t7:
         st.subheader("⚙️ إدارة وتعديل المكترين، التواريخ وأرقام العقود")
+        
+        with st.expander("🛠️ أداة دمج وتوحيد الأصناف المتشابهة (مثال: دمج 'صنف 1' مع 'محلات صنف 1')"):
+            st.write("استخدم هذه الأداة لتحويل كافة المكترين المسجلين تحت صنف معّين إلى صنف آخر بضغطة زر:")
+            col_m1, col_m2, col_m3 = st.columns(3)
+            
+            all_db_cats = run_query("SELECT DISTINCT shop_category FROM tenants WHERE shop_category IS NOT NULL AND shop_category != ''")
+            existing_cats_list = all_db_cats['shop_category'].tolist() if not all_db_cats.empty else category_options
+            
+            from_cat = col_m1.selectbox("الصنف المراد تغييره / دمجه:", options=existing_cats_list, key="from_cat_key")
+            to_cat = col_m2.selectbox("التحويل إلى الصنف الموحد:", options=category_options, key="to_cat_key")
+            
+            if col_m3.button("🔄 دمج وتوحيد الأصناف الآن"):
+                if from_cat and to_cat:
+                    c.execute("UPDATE tenants SET shop_category = %s WHERE shop_category = %s;", (to_cat, from_cat))
+                    st.success(f"✅ تم تحويل جميع المحلات المسجلة في '{from_cat}' إلى '{to_cat}' بنجاح!")
+                    st.rerun()
+
+        st.markdown("---")
         
         edit_mode = st.radio("اختر طريقة التعديل:", 
                              ["✏️ تعديل فردي (مكتري واحد)", "📊 تعديل جماعي (جدول تفاعلي / Excel)"], 
