@@ -228,7 +228,8 @@ if t1 is not None:
                         st.success("تم حفظ المكتري بنجاح!")
                     else:
                         st.error("المرجو إدخال الاسم وثمن الكراء.")
-      with col2:
+                        
+        with col2:
             st.markdown("**استيراد المكترين من ملف Excel الشامل 📥**")
             
             # 1. إنشاء نموذج Excel جاهز للتحميل
@@ -292,7 +293,7 @@ if t1 is not None:
             
             if uploaded_file is not None:
                 df_excel = pd.read_excel(uploaded_file)
-                st.dataframe(df_excel.head(5)) # عرض عينة للـتأكد
+                st.dataframe(df_excel.head(5))
                 
                 if st.button("تأكيد استيراد البيانات الشاملة"):
                     imported_count = 0
@@ -334,7 +335,6 @@ if t1 is not None:
                             
                     st.success(f"✅ تم بنجاح استيراد {imported_count} مكتري بكافة التفاصيل!")
                     st.rerun()
-
 # --- الواجهة 2: تسجيل الأداء (مع خيار التوثيق القديم) ---
 if t2 is not None:
     with t2:
