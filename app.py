@@ -179,39 +179,58 @@ else:
     t5, t3, t4 = tabs[0], tabs[1], tabs[2]
     t1 = t2 = t6 = t7 = t8 = None
 
+# دالة حساب الوضعية المالية والأشهر المتأخرة الحقيقية ديناميكياً
 def get_due_status(start_date_str, tenant_id):
     local_cur = conn.cursor()
     clean_tenant_id = int(tenant_id)
-    clean_start_date_str = str(start_date_str)
     
     try:
-        start_date = datetime.strptime(clean_start_date_str, "%Y-%m-%d").date()
+        start_date = datetime.strptime(str(start_date_str), "%Y-%m-%d").date()
     except:
         start_date = datetime.today().date()
         
     today = datetime.today().date()
+    
+    # 1. جلب كافة أسماء الأشهر المسجلة فعلياً لهذا المكتري
+    local_cur.execute("SELECT paid_months_names, months_paid FROM payments WHERE tenant_id = %s", (clean_tenant_id,))
+    rows = local_cur.fetchall()
+    local_cur.close()
+    
+    paid_month_strings = []
+    total_months_paid = 0
+    for r in rows:
+        if r[0]:
+            names = [m.strip() for m in str(r[0]).replace('،', ',').split(',')]
+            paid_month_strings.extend(names)
+        if r[1]:
+            total_months_paid += int(r[1])
+            
+    month_names_ar = ["يناير", "فبراير", "مارس", "أبريل", "ماي", "يونيو", "يوليوز", "غشت", "شتنبر", "أكتوبر", "نونبر", "دجنبر"]
+    
     total_months_since_start = (today.year - start_date.year) * 12 + today.month - start_date.month
     if today.day >= start_date.day:
         total_months_since_start += 1 
+        
+    if total_months_since_start < 1:
+        total_months_since_start = 1
+        
+    all_possible_months = []
+    unpaid_names = []
     
-    local_cur.execute("SELECT SUM(months_paid) FROM payments WHERE tenant_id = %s", (clean_tenant_id,))
-    result = local_cur.fetchone()[0]
-    local_cur.close()
-    
-    paid_months = result if result else 0
-    unpaid_months_count = total_months_since_start - paid_months
-    if unpaid_months_count < 0: unpaid_months_count = 0
-    
-    last_paid_date = start_date + relativedelta(months=int(paid_months))
-    month_names_ar = ["يناير", "فبراير", "مارس", "أبريل", "ماي", "يونيو", "يوليوز", "غشت", "شتنبر", "أكتوبر", "نونبر", "دجنبر"]
-    next_months_names = []
-    for i in range(24):
-        due_month_date = last_paid_date + relativedelta(months=i)
+    for i in range(max(total_months_since_start + 12, 36)):
+        due_month_date = start_date + relativedelta(months=i)
         m_name = month_names_ar[due_month_date.month - 1]
-        next_months_names.append(f"{m_name} {due_month_date.year}")
+        full_m_str = f"{m_name} {due_month_date.year}"
+        all_possible_months.append(full_m_str)
+        
+        # إذا لم يكن الشهر مستخلصاً وكان تاريخه قد حل، يضاف إلى غير المؤدى
+        if i < total_months_since_start and full_m_str not in paid_month_strings:
+            unpaid_names.append(full_m_str)
+            
+    unpaid_months_count = len(unpaid_names)
+    next_available_months = [m for m in all_possible_months if m not in paid_month_strings]
     
-    unpaid_names = next_months_names[:int(unpaid_months_count)]
-    return unpaid_months_count, unpaid_names, next_months_names, paid_months
+    return unpaid_months_count, unpaid_names, next_available_months, total_months_paid
 
 default_categories = ["محلات صنف 1", "محلات صنف 2", "بيع الدواجن", "بيع اللحوم", "المطاعم", "أصناف أخرى"]
 try:
@@ -850,7 +869,7 @@ if t5 is not None:
             st.info("لا يوجد أي مكتري مسجل في هذا الصنف.")
 
 # ---------------------------------------------------------
-# الواجهة 6: تصحيح وتعديل الأخطاء (تعديل الأداء والشهر والمرفق)
+# الواجهة 6: تصحيح وتعديل الأخطاء
 # ---------------------------------------------------------
 if t6 is not None:
     with t6:
@@ -1062,7 +1081,7 @@ if t7 is not None:
                     st.rerun()
 
 # ---------------------------------------------------------
-# الواجهة 8: النسخ الاحتياطي (مع كشف وحساب المحلات الشاغرة)
+# الواجهة 8: النسخ الاحتياطي
 # ---------------------------------------------------------
 if t8 is not None:
     with t8:
@@ -1116,7 +1135,6 @@ if t8 is not None:
 
             full_backup_df = pd.DataFrame(backup_data)
 
-            # حساب المحلات الشاغرة (الفارغة) لكل صنف
             grouped_shops = full_backup_df.groupby("الصنف")
             for cat_name, group in grouped_shops:
                 shop_numbers = []
