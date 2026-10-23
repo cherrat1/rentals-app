@@ -865,13 +865,178 @@ if t7 is not None:
         else:
             st.warning("لا يوجد مكترين مسجلين للتعديل.")
 
-# --- الواجهة 8: النسخ الاحتياطي ---
+# --- الواجهة 8: النسخ الاحتياطي والتصدير التفصيلي حسب الصنف ---
 if t8 is not None:
     with t8:
-        st.subheader("💾 النسخ الاحتياطي وتصدير البيانات")
-        df_all = run_query("SELECT name AS \"الاسم\", cin AS \"البطاقة\", address AS \"العنوان\", rent_price AS \"الثمن\" FROM tenants")
-        if not df_all.empty:
+        st.subheader("💾 النسخ الاحتياطي والتقرير التفصيلي (حسب الأصناف)")
+        st.write("يقوم هذا التقرير باستخراج كافة البيانات المالية والتوثيقية للمكترين، مقسمة في صفحات مستقلة لكل صنف داخل ملف Excel واحد.")
+
+        tenants_all_df = run_query("SELECT id, name, cin, address, shop_category, rent_price, start_date FROM tenants ORDER BY shop_category ASC, id ASC")
+
+        if not tenants_all_df.empty:
+            backup_data = []
+            month_names_ar = ["يناير", "فبراير", "مارس", "أبريل", "ماي", "يونيو", "يوليوز", "غشت", "شتنبر", "أكتوبر", "نونبر", "دجنبر"]
+
+            for _, row in tenants_all_df.iterrows():
+                t_id = int(row['id'])
+                s_date_str = str(row['start_date'])
+                rent = float(row['rent_price']) if pd.notna(row['rent_price']) else 0.0
+                category = str(row['shop_category']) if pd.notna(row['shop_category']) and str(row['shop_category']).strip() != '' else "غير محدد"
+
+                # 1. تنظيف رقم المحل لإزالة اسم الصنف المكرر
+                raw_address = str(row['address']) if pd.notna(row['address']) else "غير متوفر"
+                clean_shop = raw_address
+                if category != "غير محدد" and category in clean_shop:
+                    clean_shop = clean_shop.replace(category, "").strip(" -_:")
+                if not clean_shop: 
+                    clean_shop = raw_address
+
+                # 2. حساب الوضعية المالية والأشهر
+                unpaid_count, unpaid_names, _, paid_count = get_due_status(s_date_str, t_id)
+
+                # 3. تحديد اسم آخر شهر تم أداؤه
+                if paid_count > 0:
+                    try:
+                        s_dt = datetime.strptime(s_date_str, "%Y-%m-%d").date()
+                        last_paid_dt = s_dt + relativedelta(months=int(paid_count) - 1)
+                        last_paid_str = f"{month_names_ar[last_paid_dt.month - 1]} {last_paid_dt.year}"
+                    except:
+                        last_paid_str = "غير معروف"
+                else:
+                    last_paid_str = "لم يتم الأداء بعد"
+
+                unpaid_amount = unpaid_count * rent
+
+                backup_data.append({
+                    "الصنف": category,
+                    "اسم المكتري": row['name'],
+                    "رقم البطاقة": row['cin'] if pd.notna(row['cin']) and str(row['cin']).strip() != '' else "غير متوفر",
+                    "رقم المحل": clean_shop,
+                    "ثمن الكراء (درهم)": rent,
+                    "الأشهر المؤداة": paid_count,
+                    "الأشهر الغير مؤداة": unpaid_count,
+                    "آخر شهر تم أداؤه": last_paid_str,
+                    "المبالغ الغير مستخلصة (درهم)": unpaid_amount
+                })
+
+            full_backup_df = pd.DataFrame(backup_data)
+
+            # عرض المعاينة داخل التطبيق
+            st.dataframe(full_backup_df, use_container_width=True)
+
+            # إنشاء ملف Excel متعدد الصفحات (Sheet لكل صنف + Sheet شامل)
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_all.to_excel(writer, index=False, sheet_name='المكترون')
-            st.download_button("📥 تحميل نسخة المكترين Excel", data=output.getvalue(), file_name="نسخه_المكترين.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                workbook = writer.book
+
+                # التنسيقات الرسمية للإكسيل
+                header_fmt = workbook.add_format({
+                    'border': 1, 'bold': True, 'bg_color': '#1F4E79', 'font_color': '#FFFFFF',
+                    'align': 'center', 'valign': 'vcenter', 'font_size': 11
+                })
+                cell_fmt = workbook.add_format({
+                    'border': 1, 'align': 'center', 'valign': 'vcenter', 'font_size': 10
+                })
+                total_fmt = workbook.add_format({
+                    'border': 1, 'bold': True, 'bg_color': '#D9E1F2', 'font_color': '#000000',
+                    'align': 'center', 'valign': 'vcenter', 'font_size': 11
+                })
+
+                # أ) تقسيم وتقسيم الصفحات حسب كل صنف
+                grouped = full_backup_df.groupby("الصنف")
+
+                for cat_name, group in grouped:
+                    sheet_title = str(cat_name).replace("/", "-").replace("\\", "-")[:30]
+                    cat_df = group.drop(columns=["الصنف"])
+
+                    # سطر المجموع الخاص بهذا الصنف
+                    tot_rent = cat_df["ثمن الكراء (درهم)"].sum()
+                    tot_paid = cat_df["الأشهر المؤداة"].sum()
+                    tot_unpaid = cat_df["الأشهر الغير مؤداة"].sum()
+                    tot_debt = cat_df["المبالغ الغير مستخلصة (درهم)"].sum()
+
+                    total_row = pd.DataFrame([{
+                        "اسم المكتري": "المجموع الإجمالي",
+                        "رقم البطاقة": "---",
+                        "رقم المحل": "---",
+                        "ثمن الكراء (درهم)": tot_rent,
+                        "الأشهر المؤداة": tot_paid,
+                        "الأشهر الغير مؤداة": tot_unpaid,
+                        "آخر شهر تم أداؤه": "---",
+                        "المبالغ الغير مستخلصة (درهم)": tot_debt
+                    }])
+                    
+                    cat_df_display = pd.concat([cat_df, total_row], ignore_index=True)
+                    cat_df_display.to_excel(writer, index=False, sheet_name=sheet_title)
+
+                    ws = writer.sheets[sheet_title]
+                    ws.right_to_left()
+                    ws.hide_gridlines(0)
+
+                    ws.set_row(0, 25)
+                    for c_idx, c_name in enumerate(cat_df_display.columns):
+                        ws.write(0, c_idx, c_name, header_fmt)
+
+                    for r_idx in range(len(cat_df_display)):
+                        ws.set_row(r_idx + 1, 22)
+                        is_tot = (r_idx == len(cat_df_display) - 1)
+                        f = total_fmt if is_tot else cell_fmt
+                        for c_idx in range(len(cat_df_display.columns)):
+                            v = cat_df_display.iloc[r_idx, c_idx]
+                            ws.write(r_idx + 1, c_idx, v, f)
+
+                    widths = [24, 15, 12, 16, 14, 15, 18, 22]
+                    for idx, w in enumerate(widths):
+                        ws.set_column(idx, idx, w)
+
+                # ب) إضافة الصفحة الشاملة لكل المكترين بجميع الأصناف
+                all_sheet_df = full_backup_df.copy()
+                tot_rent_all = all_sheet_df["ثمن الكراء (درهم)"].sum()
+                tot_paid_all = all_sheet_df["الأشهر المؤداة"].sum()
+                tot_unpaid_all = all_sheet_df["الأشهر الغير مؤداة"].sum()
+                tot_debt_all = all_sheet_df["المبالغ الغير مستخلصة (درهم)"].sum()
+
+                tot_all_row = pd.DataFrame([{
+                    "الصنف": "المجموع الشامل",
+                    "اسم المكتري": "---",
+                    "رقم البطاقة": "---",
+                    "رقم المحل": "---",
+                    "ثمن الكراء (درهم)": tot_rent_all,
+                    "الأشهر المؤداة": tot_paid_all,
+                    "الأشهر الغير مؤداة": tot_unpaid_all,
+                    "آخر شهر تم أداؤه": "---",
+                    "المبالغ الغير مستخلصة (درهم)": tot_debt_all
+                }])
+                
+                all_sheet_df_display = pd.concat([all_sheet_df, tot_all_row], ignore_index=True)
+                all_sheet_df_display.to_excel(writer, index=False, sheet_name="التقرير الشامل")
+                
+                ws_all = writer.sheets["التقرير الشامل"]
+                ws_all.right_to_left()
+                ws_all.hide_gridlines(0)
+                ws_all.set_row(0, 25)
+
+                for c_idx, c_name in enumerate(all_sheet_df_display.columns):
+                    ws_all.write(0, c_idx, c_name, header_fmt)
+
+                for r_idx in range(len(all_sheet_df_display)):
+                    ws_all.set_row(r_idx + 1, 22)
+                    is_tot = (r_idx == len(all_sheet_df_display) - 1)
+                    f = total_fmt if is_tot else cell_fmt
+                    for c_idx in range(len(all_sheet_df_display.columns)):
+                        v = all_sheet_df_display.iloc[r_idx, c_idx]
+                        ws_all.write(r_idx + 1, c_idx, v, f)
+
+                all_widths = [16, 24, 15, 12, 16, 14, 15, 18, 22]
+                for idx, w in enumerate(all_widths):
+                    ws_all.set_column(idx, idx, w)
+
+            st.download_button(
+                "📥 تحميل ملف النسخ الاحتياطي التفصيلي (Excel مقسم حسب الأصناف)",
+                data=output.getvalue(),
+                file_name="النسخ_الاحتياطي_الشامل_حسب_الصنف.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.warning("لا يوجد أي مكتري مسجل في النظام بعد.")
+
