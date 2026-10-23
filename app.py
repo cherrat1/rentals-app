@@ -850,20 +850,103 @@ if t5 is not None:
             st.info("لا يوجد أي مكتري مسجل في هذا الصنف.")
 
 # ---------------------------------------------------------
-# الواجهة 6: تصحيح الأخطاء
+# الواجهة 6: تصحيح وتعديل الأخطاء (حذف أو تعديل التاريخ والوصل)
 # ---------------------------------------------------------
 if t6 is not None:
     with t6:
-        st.subheader("إلغاء عملية أداء مسجلة بالخطأ")
-        df_recent = run_query("SELECT id AS \"رقم العملية\", tenant_name AS \"اسم المكتري\", amount AS \"المبلغ\", payment_date AS \"تاريخ الأداء\" FROM payments ORDER BY id DESC LIMIT 30")
+        st.subheader("🛠️ تصحيح الأخطاء: تعديل أو إلغاء عمليات الأداء")
+
+        df_recent = run_query("""
+            SELECT 
+                id AS "رقم العملية", 
+                tenant_name AS "اسم المكتري", 
+                amount AS "المبلغ", 
+                payment_date AS "تاريخ الأداء",
+                paid_months_names AS "الأشهر",
+                receipt_filename AS "الملف المرفق"
+            FROM payments 
+            ORDER BY id DESC 
+            LIMIT 30
+        """)
+
         if not df_recent.empty:
-            st.dataframe(df_recent, width='stretch')
-            pid = st.number_input("أدخل رقم العملية المراد حذفها:", min_value=0, step=1, value=0)
-            if st.button("🗑️ حذف العملية"):
-                if pid > 0:
-                    c.execute("DELETE FROM payments WHERE id = %s", (int(pid),))
-                    st.success("تم الحذف بنجاح!")
-                    st.rerun()
+            st.dataframe(df_recent, use_container_width=True)
+
+            action_type = st.radio("اختر نوع الإجراء المطلوب:", 
+                                   ["✏️ تعديل عملية أداء (تاريخ / وصل / موظف)", "🗑️ حذف عملية أداء"], 
+                                   horizontal=True)
+
+            if action_type == "✏️ تعديل عملية أداء (تاريخ / وصل / موظف)":
+                st.markdown("---")
+                st.markdown("### ✏️ تعديل بيانات عملية أداء مسجلة")
+
+                # قائمة اختيار العملية
+                pay_options = {f"عملية رقم #{row['رقم العملية']} - {row['اسم المكتري']} (بتاريخ {row['تاريخ الأداء']})": int(row['رقم العملية']) for _, row in df_recent.iterrows()}
+                selected_pay_label = st.selectbox("اختر العملية المراد تعديلها:", options=list(pay_options.keys()))
+
+                if selected_pay_label:
+                    selected_pid = pay_options[selected_pay_label]
+
+                    c.execute("SELECT payment_date, receipt_filename, amount, employee, paid_months_names FROM payments WHERE id = %s", (selected_pid,))
+                    p_data = c.fetchone()
+
+                    if p_data:
+                        curr_date_str, curr_filename, curr_amount, curr_emp, curr_months_names = p_data
+
+                        try:
+                            curr_d = datetime.strptime(str(curr_date_str), "%Y-%m-%d").date()
+                        except:
+                            curr_d = datetime.today().date()
+
+                        with st.form("edit_payment_form"):
+                            st.info(f"📍 تعديل بيانات العملية رقم: **{selected_pid}** | المبلغ: **{curr_amount} درهم** | الأشهر: **{curr_months_names}**")
+                            col_p1, col_p2 = st.columns(2)
+
+                            with col_p1:
+                                new_pay_date = st.date_input("تحديث تاريخ العملية / الأداء:", value=curr_d)
+                                new_employee = st.text_input("تحديث اسم الموظف المستخلص:", value=curr_emp if curr_emp else "")
+
+                            with col_p2:
+                                if curr_filename:
+                                    st.caption(f"📁 الملف المرفق الحالي: `{curr_filename}`")
+                                else:
+                                    st.caption("📁 لا يوجد ملف مرفق حالياً بهذه العملية.")
+
+                                new_receipt_file = st.file_uploader("رفع وصل جديد (استبدال الوصل الحالي):", type=["pdf", "png", "jpg", "jpeg"], key=f"edit_rec_{selected_pid}")
+
+                            if st.form_submit_button("💾 حفظ تعديلات عملية الأداء"):
+                                if new_receipt_file is not None:
+                                    # رفع ملف جديد وتحديث كافة البيانات
+                                    r_bytes, r_name = get_file_data(new_receipt_file)
+                                    c.execute("""
+                                        UPDATE payments 
+                                        SET payment_date = %s, employee = %s, receipt_file = %s, receipt_filename = %s 
+                                        WHERE id = %s
+                                    """, (str(new_pay_date), new_employee, r_bytes, r_name, selected_pid))
+                                else:
+                                    # تحديث التاريخ واسم الموظف فقط مع الاحتفاظ بالملف القديم
+                                    c.execute("""
+                                        UPDATE payments 
+                                        SET payment_date = %s, employee = %s 
+                                        WHERE id = %s
+                                    """, (str(new_pay_date), new_employee, selected_pid))
+
+                                st.success(f"✅ تم تحديث بيانات العملية رقم {selected_pid} بنجاح!")
+                                st.rerun()
+
+            else:
+                st.markdown("---")
+                st.markdown("### 🗑️ حذف عملية أداء")
+                pid = st.number_input("أدخل رقم العملية المراد حذفها:", min_value=0, step=1, value=0)
+                if st.button("🗑️ تأكيد حذف العملية"):
+                    if pid > 0:
+                        c.execute("DELETE FROM payments WHERE id = %s", (int(pid),))
+                        st.success("✅ تم حذف العملية بنجاح!")
+                        st.rerun()
+                    else:
+                        st.warning("المرجو إدخال رقم عملية صحيح.")
+        else:
+            st.info("لا توجد عمليات أداء مسجلة حالياً.")
 
 # ---------------------------------------------------------
 # الواجهة 7: إدارة وتعديل المكترين (مع أداة دمج الأصناف)
