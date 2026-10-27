@@ -191,7 +191,6 @@ def get_due_status(start_date_str, tenant_id):
         
     today = datetime.today().date()
     
-    # 1. جلب كافة أسماء الأشهر المسجلة فعلياً لهذا المكتري
     local_cur.execute("SELECT paid_months_names, months_paid FROM payments WHERE tenant_id = %s", (clean_tenant_id,))
     rows = local_cur.fetchall()
     local_cur.close()
@@ -223,7 +222,6 @@ def get_due_status(start_date_str, tenant_id):
         full_m_str = f"{m_name} {due_month_date.year}"
         all_possible_months.append(full_m_str)
         
-        # إذا لم يكن الشهر مستخلصاً وكان تاريخه قد حل، يضاف إلى غير المؤدى
         if i < total_months_since_start and full_m_str not in paid_month_strings:
             unpaid_names.append(full_m_str)
             
@@ -966,7 +964,7 @@ if t6 is not None:
             st.info("لا توجد عمليات أداء مسجلة حالياً.")
 
 # ---------------------------------------------------------
-# الواجهة 7: إدارة وتعديل المكترين (مع أداة دمج الأصناف)
+# الواجهة 7: إدارة وتعديل المكترين (مع فلترة حسب الصنف وأداة دمج الأصناف)
 # ---------------------------------------------------------
 if t7 is not None:
     with t7:
@@ -990,11 +988,16 @@ if t7 is not None:
 
         st.markdown("---")
         
+        selected_edit_cat = st.selectbox("🏷️ فلترة القائمة حسب الصنف لسرعة التعديل والتركيز:", options=["الكل"] + category_options, key="edit_cat_filter")
+        
         edit_mode = st.radio("اختر طريقة التعديل:", 
                              ["✏️ تعديل فردي (مكتري واحد)", "📊 تعديل جماعي (جدول تفاعلي / Excel)"], 
                              horizontal=True)
         
-        tenants_edit_df = run_query("SELECT id, name, contract_id, cin, address, phone, rent_price, shop_category, start_date FROM tenants ORDER BY id ASC")
+        if selected_edit_cat == "الكل":
+            tenants_edit_df = run_query("SELECT id, name, contract_id, cin, address, phone, rent_price, shop_category, start_date FROM tenants ORDER BY id ASC")
+        else:
+            tenants_edit_df = run_query("SELECT id, name, contract_id, cin, address, phone, rent_price, shop_category, start_date FROM tenants WHERE shop_category = %s ORDER BY id ASC", (selected_edit_cat,))
         
         if not tenants_edit_df.empty:
             if edit_mode == "✏️ تعديل فردي (مكتري واحد)":
@@ -1036,7 +1039,7 @@ if t7 is not None:
 
             else:
                 st.markdown("### 1️⃣ التعديل المباشر عبر الجدول التفاعلي")
-                st.info("يمكنك تعديل أرقام العقود، التواريخ، الأصناف مباشرة داخل الجدول ثم الحفظ:")
+                st.info(f"عرض المكترين حسب الصنف المختار: **{selected_edit_cat}**. يمكنك تعديل البيانات مباشرة داخل الجدول ثم الحفظ:")
                 
                 edited_df = st.data_editor(
                     tenants_edit_df,
@@ -1054,7 +1057,7 @@ if t7 is not None:
                     disabled=["id"],
                     use_container_width=True,
                     num_rows="fixed",
-                    key="bulk_tenant_editor"
+                    key=f"bulk_tenant_editor_{selected_edit_cat}"
                 )
                 
                 if st.button("💾 حفظ التعديلات الجماعية من الجدول"):
@@ -1079,6 +1082,8 @@ if t7 is not None:
                         updated_count += 1
                     st.success(f"✅ تم حفظ التعديلات الجماعية لـ {updated_count} مكتري بنجاح!")
                     st.rerun()
+        else:
+            st.warning(f"لا يوجد أي مكتري مسجل في الصنف المختار ({selected_edit_cat}).")
 
 # ---------------------------------------------------------
 # الواجهة 8: النسخ الاحتياطي
