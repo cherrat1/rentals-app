@@ -150,40 +150,8 @@ try:
 except:
     pass
 
-# تصحيح وتوحيد الأصناف المسجلة سابقاً أوتوماتيكياً
-try:
-    c.execute("UPDATE tenants SET shop_category = 'محلات صنف 1' WHERE shop_category ILIKE 'صنف 1' OR shop_category ILIKE 'صنف 01' OR shop_category ILIKE 'صنف1' OR shop_category ILIKE '%صنف 1%';")
-    c.execute("UPDATE tenants SET shop_category = 'محلات صنف 2' WHERE shop_category ILIKE 'صنف 2' OR shop_category ILIKE 'صنف 02' OR shop_category ILIKE 'صنف2' OR shop_category ILIKE '%صنف 2%';")
-except:
-    pass
-
-st.title("🏢 نظام تسيير كراء المحلات التجارية")
-
-# تخصيص الواجهات حسب الصلاحية
-role = st.session_state["role"]
-
-if role == "SuperAdmin":
-    tab_names = ["➕ إضافة مكتري", "💰 تسجيل أداء", "🏦 تقرير البنك", "⚖️ المتقاعسون", "🔍 البحث والتصفية", "🗑️ تصحيح الأخطاء", "⚙️ إدارة المكترين", "💾 النسخ الاحتياطي"]
-    tabs = st.tabs(tab_names)
-    t1, t2, t3, t4, t5, t6, t7, t8 = tabs[0], tabs[1], tabs[2], tabs[3], tabs[4], tabs[5], tabs[6], tabs[7]
-elif role == "FinanceAdmin":
-    tabs = st.tabs(["💰 تسجيل أداء", "🏦 تقرير البنك", "🔍 البحث والتصفية"])
-    t2, t3, t5 = tabs[0], tabs[1], tabs[2]
-    t1 = t4 = t6 = t7 = t8 = None
-elif role == "LocalAdmin":
-    tabs = st.tabs(["➕ إضافة مكتري", "⚖️ المتقاعسون", "🔍 البحث والتصفية", "⚙️ إدارة المكترين"])
-    t1, t4, t5, t7 = tabs[0], tabs[1], tabs[2], tabs[3]
-    t2 = t3 = t6 = t8 = None
-else:
-    tabs = st.tabs(["🔍 البحث والتصفية", "🏦 تقرير البنك", "⚖️ المتقاعسون"])
-    t5, t3, t4 = tabs[0], tabs[1], tabs[2]
-    t1 = t2 = t6 = t7 = t8 = None
-
-# دالة حساب الوضعية المالية والأشهر المتأخرة الحقيقية ديناميكياً
-def get_due_status(start_date_str, tenant_id):
-    local_cur = conn.cursor()
-    clean_tenant_id = int(tenant_id)
-    
+# دالة حساب الوضعية المالية السريعة في الذاكرة (بدون اتصال متكرر بقاعدة البيانات)
+def calculate_due_status_fast(start_date_str, tenant_payments):
     try:
         start_date = datetime.strptime(str(start_date_str), "%Y-%m-%d").date()
     except:
@@ -191,18 +159,14 @@ def get_due_status(start_date_str, tenant_id):
         
     today = datetime.today().date()
     
-    local_cur.execute("SELECT paid_months_names, months_paid FROM payments WHERE tenant_id = %s", (clean_tenant_id,))
-    rows = local_cur.fetchall()
-    local_cur.close()
-    
     paid_month_strings = []
     total_months_paid = 0
-    for r in rows:
-        if r[0]:
-            names = [m.strip() for m in str(r[0]).replace('،', ',').split(',')]
+    for p_names, p_months in tenant_payments:
+        if p_names:
+            names = [m.strip() for m in str(p_names).replace('،', ',').split(',')]
             paid_month_strings.extend(names)
-        if r[1]:
-            total_months_paid += int(r[1])
+        if p_months:
+            total_months_paid += int(p_months)
             
     month_names_ar = ["يناير", "فبراير", "مارس", "أبريل", "ماي", "يونيو", "يوليوز", "غشت", "شتنبر", "أكتوبر", "نونبر", "دجنبر"]
     
@@ -229,6 +193,39 @@ def get_due_status(start_date_str, tenant_id):
     next_available_months = [m for m in all_possible_months if m not in paid_month_strings]
     
     return unpaid_months_count, unpaid_names, next_available_months, total_months_paid
+
+# دالة جلب كافة الأداءات وتصنيفها حسب المكتري دفعة واحدة لرفع السرعة
+def get_all_payments_by_tenant():
+    df_p = run_query("SELECT tenant_id, paid_months_names, months_paid FROM payments")
+    payments_dict = {}
+    if not df_p.empty:
+        for _, r in df_p.iterrows():
+            tid = int(r['tenant_id']) if pd.notna(r['tenant_id']) else 0
+            if tid not in payments_dict:
+                payments_dict[tid] = []
+            payments_dict[tid].append((r['paid_months_names'], r['months_paid']))
+    return payments_dict
+
+st.title("🏢 نظام تسيير كراء المحلات التجارية")
+
+role = st.session_state["role"]
+
+if role == "SuperAdmin":
+    tab_names = ["➕ إضافة مكتري", "💰 تسجيل أداء", "🏦 تقرير البنك", "⚖️ المتقاعسون", "🔍 البحث والتصفية", "🗑️ تصحيح الأخطاء", "⚙️ إدارة المكترين", "💾 النسخ الاحتياطي"]
+    tabs = st.tabs(tab_names)
+    t1, t2, t3, t4, t5, t6, t7, t8 = tabs[0], tabs[1], tabs[2], tabs[3], tabs[4], tabs[5], tabs[6], tabs[7]
+elif role == "FinanceAdmin":
+    tabs = st.tabs(["💰 تسجيل أداء", "🏦 تقرير البنك", "🔍 البحث والتصفية"])
+    t2, t3, t5 = tabs[0], tabs[1], tabs[2]
+    t1 = t4 = t6 = t7 = t8 = None
+elif role == "LocalAdmin":
+    tabs = st.tabs(["➕ إضافة مكتري", "⚖️ المتقاعسون", "🔍 البحث والتصفية", "⚙️ إدارة المكترين"])
+    t1, t4, t5, t7 = tabs[0], tabs[1], tabs[2], tabs[3]
+    t2 = t3 = t6 = t8 = None
+else:
+    tabs = st.tabs(["🔍 البحث والتصفية", "🏦 تقرير البنك", "⚖️ المتقاعسون"])
+    t5, t3, t4 = tabs[0], tabs[1], tabs[2]
+    t1 = t2 = t6 = t7 = t8 = None
 
 default_categories = ["محلات صنف 1", "محلات صنف 2", "بيع الدواجن", "بيع اللحوم", "المطاعم", "أصناف أخرى"]
 try:
@@ -292,15 +289,6 @@ if t1 is not None:
                     "ثمن الكراء": 1500,
                     "الصنف": "محلات صنف 1",
                     "رقم المحل": "1"
-                },
-                {
-                    "اسم المكتري": "فاطمة الزهراء",
-                    "رقم البطاقة": "CD789012",
-                    "تاريخ بداية الكراء": "15/02/2024",
-                    "رقم العقد": "C-2024/02",
-                    "ثمن الكراء": 2000,
-                    "الصنف": "محلات صنف 1",
-                    "رقم المحل": "2"
                 }
             ])
             
@@ -398,7 +386,10 @@ if t2 is not None:
             current_tenant_rent = float(tenants_df.loc[tenants_df['name'] == selected_tenant, 'rent_price'].values[0])
             start_date_str = str(tenants_df.loc[tenants_df['name'] == selected_tenant, 'start_date'].values[0])
             
-            unpaid_count, unpaid_names, next_months_names, paid_months = get_due_status(start_date_str, t_id)
+            p_df = run_query("SELECT paid_months_names, months_paid FROM payments WHERE tenant_id = %s", (t_id,))
+            tenant_payments = list(zip(p_df['paid_months_names'], p_df['months_paid'])) if not p_df.empty else []
+            
+            unpaid_count, unpaid_names, next_months_names, paid_months = calculate_due_status_fast(start_date_str, tenant_payments)
             selected_months = st.multiselect("اختر الأشهر المراد أداؤها:", options=next_months_names, default=unpaid_names if unpaid_count > 0 else [])
             months_paid = len(selected_months)
             
@@ -627,7 +618,7 @@ if t3 is not None:
                 st.warning("لا توجد أداءات مسجلة في هذه الفترة.")
 
 # ---------------------------------------------------------
-# الواجهة 4: المتقاعسون
+# الواجهة 4: المتقاعسون (سريعة بدون استعلامات متكررة)
 # ---------------------------------------------------------
 if t4 is not None:
     with t4:
@@ -641,12 +632,14 @@ if t4 is not None:
             p = (defaulter_filter_cat,)
             
         tenants_df = run_query(q, p)
+        all_payments_dict = get_all_payments_by_tenant()
         
         defaulters = []
         raw_defaulters = []
         for index, row in tenants_df.iterrows():
             t_id = int(row['id'])
-            unpaid_count, unpaid_names, _, _ = get_due_status(str(row['start_date']), t_id)
+            t_payments = all_payments_dict.get(t_id, [])
+            unpaid_count, unpaid_names, _, _ = calculate_due_status_fast(str(row['start_date']), t_payments)
             if unpaid_count > 0:
                 defaulters.append({
                     "الاسم": row['name'], "الهاتف": row['phone'],
@@ -656,7 +649,7 @@ if t4 is not None:
                 raw_defaulters.append(row)
                 
         if defaulters:
-            st.dataframe(pd.DataFrame(defaulters), width='stretch')
+            st.dataframe(pd.DataFrame(defaulters), use_container_width=True)
             
             if role in ["SuperAdmin", "LocalAdmin"]:
                 st.markdown("---")
@@ -669,7 +662,9 @@ if t4 is not None:
                     s_row = next(item for item in raw_defaulters if item['name'] == selected_def_name)
                     sel_id = int(s_row['id'])
                     sel_phone = str(s_row['phone'])
-                    u_cnt, u_nms, _, _ = get_due_status(str(s_row['start_date']), sel_id)
+                    
+                    t_payments = all_payments_dict.get(sel_id, [])
+                    u_cnt, u_nms, _, _ = calculate_due_status_fast(str(s_row['start_date']), t_payments)
                     tot_debt = u_cnt * s_row['rent_price']
                     months_str = "، ".join(u_nms)
                     date_today = datetime.today().strftime("%Y-%m-%d")
@@ -775,7 +770,7 @@ if t4 is not None:
             st.success("لا توجد متقاعسين.")
 
 # ---------------------------------------------------------
-# الواجهة 5: البحث والتصفية
+# الواجهة 5: البحث والتصفية (سريعة - تحميل الوثائق عند الطلب فقط)
 # ---------------------------------------------------------
 if t5 is not None:
     with t5:
@@ -814,7 +809,10 @@ if t5 is not None:
                             st.write(f"**رقم العقد:** {row.get('contract_id', 'غير متوفر')}")
                     
                     st.markdown("### 💰 الوضعية المالية (الأداءات والديون)")
-                    u_cnt, u_nms, _, p_months = get_due_status(str(row['start_date']), t_id)
+                    p_df = run_query("SELECT paid_months_names, months_paid FROM payments WHERE tenant_id = %s", (t_id,))
+                    tenant_payments = list(zip(p_df['paid_months_names'], p_df['months_paid'])) if not p_df.empty else []
+                    
+                    u_cnt, u_nms, _, p_months = calculate_due_status_fast(str(row['start_date']), tenant_payments)
                     
                     c_stat1, c_stat2 = st.columns(2)
                     with c_stat1:
@@ -964,7 +962,7 @@ if t6 is not None:
             st.info("لا توجد عمليات أداء مسجلة حالياً.")
 
 # ---------------------------------------------------------
-# الواجهة 7: إدارة وتعديل المكترين (مع فلترة حسب الصنف وأداة دمج الأصناف)
+# الواجهة 7: إدارة وتعديل المكترين (سريعة - فلترة حصرية)
 # ---------------------------------------------------------
 if t7 is not None:
     with t7:
@@ -1086,7 +1084,7 @@ if t7 is not None:
             st.warning(f"لا يوجد أي مكتري مسجل في الصنف المختار ({selected_edit_cat}).")
 
 # ---------------------------------------------------------
-# الواجهة 8: النسخ الاحتياطي
+# الواجهة 8: النسخ الاحتياطي (سريعة - معالجة سريعة في الذاكرة)
 # ---------------------------------------------------------
 if t8 is not None:
     with t8:
@@ -1094,6 +1092,7 @@ if t8 is not None:
         st.write("يقوم هذا التقرير باستخراج كافة البيانات المالية والتوثيقية للمكترين، مقسمة في صفحات مستقلة لكل صنف داخل ملف Excel واحد، مع حصر دقيق لأرقام المحلات الشاغرة (الفارغة).")
 
         tenants_all_df = run_query("SELECT id, name, cin, address, shop_category, rent_price, start_date FROM tenants ORDER BY shop_category ASC, id ASC")
+        all_payments_dict = get_all_payments_by_tenant()
 
         if not tenants_all_df.empty:
             backup_data = []
@@ -1112,7 +1111,8 @@ if t8 is not None:
                     clean_shop = clean_shop.replace(category, "").strip(" -_:")
                 if not clean_shop: clean_shop = raw_address
 
-                unpaid_count, unpaid_names, _, paid_count = get_due_status(s_date_str, t_id)
+                t_payments = all_payments_dict.get(t_id, [])
+                unpaid_count, unpaid_names, _, paid_count = calculate_due_status_fast(s_date_str, t_payments)
 
                 if paid_count > 0:
                     try:
