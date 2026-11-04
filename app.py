@@ -81,7 +81,7 @@ def init_connection():
 conn = init_connection()
 c = conn.cursor()
 
-# دالة الاستعلام السريعة المعتمدة على الذاكرة العشوائية RAM
+# دالة الاستعلام السريعة المعتمدة على الذاكرة العشوائية RAM (النصوص والأرقام فقط)
 @st.cache_data(ttl=600, show_spinner=False)
 def run_query(query, params=None):
     cur = conn.cursor()
@@ -100,6 +100,35 @@ def clear_app_cache():
 def get_file_data(uploaded_file):
     if uploaded_file is not None:
         return uploaded_file.getvalue(), uploaded_file.name
+    return None, None
+
+# ---------------------------------------------------------
+# دائل مستقلة غير مخزنة كاش لجلب الملفات الثنائية (BYTEA) عند الطلب
+# ---------------------------------------------------------
+def get_receipt_bytes(payment_id):
+    """جلب ملف وصل الأداء عند الضغط على زر التحميل دون إدخاله في كاش Streamlit"""
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT receipt_file, receipt_filename FROM payments WHERE id = %s", (payment_id,))
+        res = cur.fetchone()
+        cur.close()
+        if res and res[0]:
+            return bytes(res[0]), res[1]
+    except Exception:
+        pass
+    return None, None
+
+def get_tenant_file(tenant_id, file_col, name_col):
+    """جلب وثائق ومرفقات المكتري عند الضغط على زر التحميل دون إدخالها في كاش Streamlit"""
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT {file_col}, {name_col} FROM tenants WHERE id = %s", (tenant_id,))
+        res = cur.fetchone()
+        cur.close()
+        if res and res[0]:
+            return bytes(res[0]), res[1]
+    except Exception:
+        pass
     return None, None
 
 def normalize_category_name(cat_input):
@@ -642,7 +671,7 @@ elif active_tab == "⚖️ المتقاعسون":
         st.success("لا توجد متقاعسين.")
 
 # ---------------------------------------------------------
-# الواجهة 5: البحث والتصفية (جلب الوثائق والمرفقات عند الطلب)
+# الواجهة 5: البحث والتصفية (جلب الوثائق والوصولات عند الطلب بشكل مستقل)
 # ---------------------------------------------------------
 elif active_tab == "🔍 البحث والتصفية":
     st.subheader("البحث عن مكتري وعرض التفاصيل، الديون، والمرفقات")
@@ -659,7 +688,13 @@ elif active_tab == "🔍 البحث والتصفية":
         
         if selected_option:
             t_id = int(selected_option.split("[ID: ")[1].replace("]", ""))
-            df_search = run_query("SELECT * FROM tenants WHERE id = %s", (t_id,))
+            
+            # جلب البيانات النصية فقط دون ملفات BYTEA لتفادي خطأ Caching
+            df_search = run_query("""
+                SELECT id, name, cin, phone, address, shop_category, start_date, rent_price, contract_id, 
+                       id_card_filename, contract_filename, conditions_filename, notice_1_filename, notice_2_filename, cancellation_filename 
+                FROM tenants WHERE id = %s
+            """, (t_id,))
             
             if not df_search.empty:
                 row = df_search.iloc[0]
@@ -685,15 +720,26 @@ elif active_tab == "🔍 البحث والتصفية":
                 c_stat1, c_stat2 = st.columns(2)
                 with c_stat1:
                     st.info(f"**إجمالي الأشهر المؤداة:** {p_months} أشهر")
-                    payments_df = run_query("SELECT amount, payment_date, paid_months_names, receipt_filename, receipt_file FROM payments WHERE tenant_id = %s ORDER BY id DESC", (t_id,))
+                    # جلب تفاصيل الأداءات والأسماء فقط بدون ملف BYTEA الثقيل
+                    payments_df = run_query("SELECT id, amount, payment_date, paid_months_names, receipt_filename FROM payments WHERE tenant_id = %s ORDER BY id DESC", (t_id,))
                     if not payments_df.empty:
                         st.write("**تاريخ الأداءات ووصولات الدفع:**")
                         for p_idx, p_row in payments_df.iterrows():
+                            p_id = int(p_row['id'])
                             with st.expander(f"📅 دفعة بتاريخ {p_row['payment_date']} | مبلغ {p_row['amount']} درهم"):
                                 st.write(f"**الأشهر التي تم أداؤها:** {p_row['paid_months_names']}")
-                                if pd.notna(p_row.get('receipt_file')) and p_row.get('receipt_file'):
-                                    file_bytes = bytes(p_row['receipt_file'])
-                                    st.download_button(label=f"📥 تحميل وصل الأداء ({p_row.get('receipt_filename', 'وصل.pdf')})", data=file_bytes, file_name=p_row.get('receipt_filename', 'وصل.pdf'), key=f"rec_{t_id}_{p_idx}")
+                                if pd.notna(p_row.get('receipt_filename')) and str(p_row.get('receipt_filename')).strip() != '':
+                                    # دالة مستقلة تجلب الملف الثنائي عند ضغط زر التحميل مباشرة
+                                    r_bytes, r_filename = get_receipt_bytes(p_id)
+                                    if r_bytes:
+                                        st.download_button(
+                                            label=f"📥 تحميل وصل الأداء ({r_filename})", 
+                                            data=r_bytes, 
+                                            file_name=r_filename, 
+                                            key=f"rec_dl_{t_id}_{p_id}_{p_idx}"
+                                        )
+                                    else:
+                                        st.warning("الملف المرفق غير متوفر في قاعدة البيانات.")
                                 else:
                                     st.warning("لا يوجد وصل مرفق لهذه العملية.")
                     else:
@@ -708,30 +754,36 @@ elif active_tab == "🔍 البحث والتصفية":
                         st.success("✅ المكتري في وضعية سليمة، لا توجد ديون متأخرة!")
 
                 st.markdown("### 📁 الوثائق والمرفقات الأساسية")
-                attachments = []
-                if pd.notna(row.get('id_card_file')) and row.get('id_card_file'):
-                    attachments.append((row.get('id_card_filename', 'البطاقة.pdf'), bytes(row['id_card_file'])))
-                if pd.notna(row.get('contract_file')) and row.get('contract_file'):
-                    attachments.append((row.get('contract_filename', 'العقد.pdf'), bytes(row['contract_file'])))
-                if pd.notna(row.get('conditions_file')) and row.get('conditions_file'):
-                    attachments.append((row.get('conditions_filename', 'الكناش.pdf'), bytes(row['conditions_file'])))
-                if pd.notna(row.get('notice_1_file')) and row.get('notice_1_file'):
-                    attachments.append((row.get('notice_1_filename', 'الإنذار_الأول.pdf'), bytes(row['notice_1_file'])))
-                if pd.notna(row.get('notice_2_file')) and row.get('notice_2_file'):
-                    attachments.append((row.get('notice_2_filename', 'الإنذار_الثاني.pdf'), bytes(row['notice_2_file'])))
-                if pd.notna(row.get('cancellation_file')) and row.get('cancellation_file'):
-                    attachments.append((row.get('cancellation_filename', 'طلب_الإفراغ.pdf'), bytes(row['cancellation_file'])))
-                    
-                if attachments:
-                    cols = st.columns(len(attachments))
-                    for i, (fname, fbytes) in enumerate(attachments):
-                        with cols[i]:
-                            st.download_button(label=f"📥 {fname}", data=fbytes, file_name=fname, key=f"dl_main_{t_id}_{i}")
-                else:
+                doc_fields = [
+                    ("id_card_file", "id_card_filename", "البطاقة الوطنية"),
+                    ("contract_file", "contract_filename", "عقد الكراء"),
+                    ("conditions_file", "conditions_filename", "كناش التحملات"),
+                    ("notice_1_file", "notice_1_filename", "الإنذار الأول"),
+                    ("notice_2_file", "notice_2_filename", "الإنذار الثاني"),
+                    ("cancellation_file", "cancellation_filename", "طلب الإفراغ")
+                ]
+                
+                doc_cols = st.columns(3)
+                found_doc_count = 0
+                for f_col, n_col, label in doc_fields:
+                    fname = row.get(n_col)
+                    if pd.notna(fname) and str(fname).strip() != '':
+                        fbytes, real_fname = get_tenant_file(t_id, f_col, n_col)
+                        if fbytes:
+                            with doc_cols[found_doc_count % 3]:
+                                st.download_button(
+                                    label=f"📥 {label} ({real_fname})",
+                                    data=fbytes,
+                                    file_name=real_fname,
+                                    key=f"dl_tenant_doc_{t_id}_{f_col}"
+                                )
+                            found_doc_count += 1
+                
+                if found_doc_count == 0:
                     st.info("لا توجد وثائق أساسية مسجلة لهذا المكتري.")
 
 # ---------------------------------------------------------
-# الواجهة 6: تصحيح وتعديل الأخطاء (التعديل والحذف الكامل)
+# الواجهة 6: تصحيح وتعديل الأخطاء
 # ---------------------------------------------------------
 elif active_tab == "🗑️ تصحيح الأخطاء":
     st.subheader("🛠️ تصحيح الأخطاء: تعديل أو إلغاء عمليات الأداء")
@@ -791,7 +843,7 @@ elif active_tab == "🗑️ تصحيح الأخطاء":
                     st.warning("المرجو إدخال رقم عملية صحيح.")
 
 # ---------------------------------------------------------
-# الواجهة 7: إدارة وتعديل المكترين (دمج الأصناف والتعديل الفردي والجماعي)
+# الواجهة 7: إدارة وتعديل المكترين
 # ---------------------------------------------------------
 elif active_tab == "⚙️ إدارة المكترين":
     st.subheader("⚙️ إدارة وتعديل المكترين، التواريخ وأرقام العقود")
@@ -871,7 +923,7 @@ elif active_tab == "⚙️ إدارة المكترين":
                 st.rerun()
 
 # ---------------------------------------------------------
-# الواجهة 8: النسخ الاحتياطي (تقرير كامل، محلات شاغرة وأوراق مستقلة لكل صنف)
+# الواجهة 8: النسخ الاحتياطي
 # ---------------------------------------------------------
 elif active_tab == "💾 النسخ الاحتياطي":
     st.subheader("💾 النسخ الاحتياطي والتقرير التفصيلي وحصر المحلات الشاغرة")
