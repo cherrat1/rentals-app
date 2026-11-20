@@ -400,12 +400,17 @@ if active_tab == "➕ إضافة مكتري":
                 clear_app_cache()
                 st.success(f"✅ تم بنجاح استيراد {imported_count} مكتري!")
                 st.rerun()
-
 # ---------------------------------------------------------
-# الواجهة 2: تسجيل الأداء
+# الواجهة 2: تسجيل الأداء (مع زر إضافة وصل آخر مستقل)
 # ---------------------------------------------------------
 elif active_tab == "💰 تسجيل أداء":
     st.subheader("تسجيل أداء جديد مع وصل الدفع")
+
+    if "receipt_slots" not in st.session_state:
+        st.session_state["receipt_slots"] = 1
+    if "receipt_uploader_reset" not in st.session_state:
+        st.session_state["receipt_uploader_reset"] = 0
+
     c_filt1, c_filt2 = st.columns([2, 1])
     selected_filter_cat = c_filt1.selectbox("فلترة المكترين حسب الصنف:", options=["الكل"] + category_options, key="pay_cat_filter")
     include_cancelled_pay = c_filt2.checkbox("إظهار العقود الموقوفة (لتسوية ديون سابقة)", value=False)
@@ -440,46 +445,88 @@ elif active_tab == "💰 تسجيل أداء":
         selected_months = st.multiselect("اختر الأشهر المراد أداؤها:", options=next_months_names, default=unpaid_names if unpaid_count > 0 else [])
         months_paid = len(selected_months)
         
-        with st.form("payment_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            payment_date = c1.date_input("تاريخ الأداء", datetime.today())
-            employee_name = c2.text_input("اسم الموظف المستخلص")
-            is_already_sent = st.checkbox("📌 هذه عملية قديمة تم إرسالها للبنك سابقاً (إدخال للأرشيف والبحث فقط)", value=False)
-            st.markdown("---")
-            receipt_option = st.radio("كيف تريد إرفاق الوصولات؟", options=["📄 وصل واحد يجمع كل الأشهر المحددة", "📑 وصولات منفصلة (رفع عدة ملفات دفعة واحدة)"], horizontal=True)
-            
-            single_receipt_file = None
-            uploaded_multiple_files = []
-            
-            if months_paid > 0:
+        c1, c2 = st.columns(2)
+        payment_date = c1.date_input("تاريخ الأداء", datetime.today(), key="pay_date_input")
+        employee_name = c2.text_input("اسم الموظف المستخلص", key="pay_emp_input")
+        is_already_sent = st.checkbox("📌 هذه عملية قديمة تم إرسالها للبنك سابقاً (إدخال للأرشيف والبحث فقط)", value=False, key="pay_sent_chk")
+        
+        st.markdown("---")
+        receipt_option = st.radio(
+            "كيف تريد إرفاق الوصولات؟",
+            options=["📄 وصل واحد يجمع كل الأشهر المحددة", "📑 وصولات منفصلة (إضافة وصل لكل شهر)"],
+            horizontal=True,
+            key="receipt_mode_radio"
+        )
+        
+        single_receipt_file = None
+        separate_files = []
+        reset_idx = st.session_state["receipt_uploader_reset"]
+        
+        if months_paid > 0:
+            calculated_amount = float(current_tenant_rent * months_paid)
+            if receipt_option == "📄 وصل واحد يجمع كل الأشهر المحددة":
+                st.info(f"**المبلغ الإجمالي:** {calculated_amount} درهم")
+                single_receipt_file = st.file_uploader(
+                    "إرفاق الوصل الإجمالي",
+                    type=["pdf", "png", "jpg", "jpeg"],
+                    key=f"single_rec_slot_{reset_idx}"
+                )
+            else:
+                active_slots = min(st.session_state["receipt_slots"], months_paid)
+                if active_slots < 1:
+                    active_slots = 1
+                st.session_state["receipt_slots"] = active_slots
+
+                st.info(f"**المبلغ الإجمالي:** {calculated_amount} درهم | خانات الوصولات المضافة: **{active_slots} من {months_paid}**")
+                
+                for i in range(active_slots):
+                    month_label = selected_months[i]
+                    f_obj = st.file_uploader(
+                        f"📎 الوصل رقم {i + 1} (الخاص بشهر: {month_label})",
+                        type=["pdf", "png", "jpg", "jpeg"],
+                        key=f"multi_rec_slot_{i}_{reset_idx}"
+                    )
+                    separate_files.append(f_obj)
+                
+                btn_col1, btn_col2, _ = st.columns([1.4, 1.4, 2.2])
+                with btn_col1:
+                    if active_slots < months_paid:
+                        if st.button("➕ إضافة وصل آخر", key="add_receipt_slot_btn"):
+                            st.session_state["receipt_slots"] += 1
+                            st.rerun()
+                with btn_col2:
+                    if active_slots > 1:
+                        if st.button("➖ حذف آخر خانة", key="remove_receipt_slot_btn"):
+                            st.session_state["receipt_slots"] -= 1
+                            st.rerun()
+        
+        st.markdown("---")
+        if st.button("✅ تأكيد وتسجيل الأداء", type="primary", key="submit_payment_btn"):
+            if months_paid == 0:
+                st.warning("المرجو اختيار شهر واحد على الأقل.")
+            else:
                 if receipt_option == "📄 وصل واحد يجمع كل الأشهر المحددة":
+                    r_bytes, r_name = get_file_data(single_receipt_file)
+                    paid_months_str = "، ".join(selected_months)
                     calculated_amount = float(current_tenant_rent * months_paid)
-                    st.info(f"**المبلغ الإجمالي:** {calculated_amount} درهم")
-                    single_receipt_file = st.file_uploader("إرفاق الوصل الإجمالي", type=["pdf", "png", "jpg", "jpeg"])
+                    c.execute(
+                        "INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename, is_sent_to_bank) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (t_id, selected_tenant, months_paid, calculated_amount, str(payment_date), employee_name, paid_months_str, r_bytes, r_name, is_already_sent)
+                    )
                 else:
-                    st.info(f"اختر {months_paid} ملفات. سيتم ربط كل ملف بشهر تلقائياً.")
-                    uploaded_multiple_files = st.file_uploader("إرفاق الوصولات (رفع متعدد)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-            
-            if st.form_submit_button("تأكيد وتسجيل الأداء"):
-                if months_paid == 0:
-                    st.warning("المرجو اختيار شهر واحد على الأقل.")
-                else:
-                    if receipt_option == "📄 وصل واحد يجمع كل الأشهر المحددة":
-                        r_bytes, r_name = get_file_data(single_receipt_file)
-                        paid_months_str = "، ".join(selected_months)
-                        calculated_amount = float(current_tenant_rent * months_paid)
-                        c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename, is_sent_to_bank) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                                  (t_id, selected_tenant, months_paid, calculated_amount, str(payment_date), employee_name, paid_months_str, r_bytes, r_name, is_already_sent))
-                    else:
-                        for i, m in enumerate(selected_months):
-                            r_file = uploaded_multiple_files[i] if i < len(uploaded_multiple_files) else None
-                            r_bytes, r_name = get_file_data(r_file)
-                            c.execute("INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename, is_sent_to_bank) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                                      (t_id, selected_tenant, 1, current_tenant_rent, str(payment_date), employee_name, m, r_bytes, r_name, is_already_sent))
-                    
-                    clear_app_cache()
-                    st.success("✅ تم تسجيل الأداء بنجاح!")
-                    st.rerun()
+                    for i, m in enumerate(selected_months):
+                        r_file = separate_files[i] if i < len(separate_files) else None
+                        r_bytes, r_name = get_file_data(r_file)
+                        c.execute(
+                            "INSERT INTO payments (tenant_id, tenant_name, months_paid, amount, payment_date, employee, paid_months_names, receipt_file, receipt_filename, is_sent_to_bank) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            (t_id, selected_tenant, 1, current_tenant_rent, str(payment_date), employee_name, m, r_bytes, r_name, is_already_sent)
+                        )
+                
+                st.session_state["receipt_slots"] = 1
+                st.session_state["receipt_uploader_reset"] += 1
+                clear_app_cache()
+                st.success("✅ تم تسجيل الأداء وحفظ جميع الوصولات بنجاح!")
+                st.rerun()
     else:
         st.info("لا يوجد مكترون مطابقون لمعايير الفلترة.")
 
